@@ -1,0 +1,179 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Initial release or semantic version bump
+        required: true
+        default: initial
+        type: choice
+        options:
+          - initial
+          - patch
+          - minor
+          - major
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
+    # macOS 15 runner는 arm64이며, 앱의 deployment target(macOS 14+)과는 별개다.
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout the release commit
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: source
+          ref: >-
+            ${{ github.event_name == 'pull_request_target' &&
+                github.event.pull_request.merge_commit_sha || github.sha }}
+
+      - name: Determine release version
+        id: version
+        working-directory: source
+        env:
+          MANUAL_RELEASE_TYPE: ${{ inputs.release_type }}
+          RELEASE_SHA: >-
+            ${{ github.event_name == 'pull_request_target' &&
+                github.event.pull_request.merge_commit_sha || github.sha }}
+        run: |
+          git fetch --force --tags origin
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            bump="$MANUAL_RELEASE_TYPE"
+          else
+            release_count="$(jq '[.pull_request.labels[].name | select(
+              . == "release:major" or
+              . == "release:minor" or
+              . == "release:patch" or
+              . == "release:none"
+            )] | length' "$GITHUB_EVENT_PATH")"
+            if [[ "$release_count" -ne 1 ]]; then
+              echo "병합된 PR에는 release 라벨이 정확히 하나 있어야 합니다."
+              exit 1
+            fi
+            release_label="$(jq -r '[.pull_request.labels[].name | select(
+              . == "release:major" or
+              . == "release:minor" or
+              . == "release:patch" or
+              . == "release:none"
+            )][0]' "$GITHUB_EVENT_PATH")"
+            bump="${release_label#release:}"
+          fi
+
+          if [[ "$bump" == "none" ]]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "release:none — 릴리스를 생성하지 않습니다."
+            exit 0
+          fi
+
+          latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | sed -n '1p')"
+
+          if [[ -n "$latest_tag" ]] && git merge-base --is-ancestor "$RELEASE_SHA" "$latest_tag"; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "$RELEASE_SHA 커밋은 이미 $latest_tag 릴리스에 포함돼 있습니다."
+            exit 0
+          fi
+
+          if [[ -z "$latest_tag" ]]; then
+            next_version="0.1.0"
+          else
+            if [[ "$bump" == "initial" ]]; then
+              echo "initial은 태그가 하나도 없을 때만 사용할 수 있습니다."
+              exit 1
+            fi
+
+            current="${latest_tag#v}"
+            IFS=. read -r major minor patch <<< "$current"
+            case "$bump" in
+              major) next_version="$((major + 1)).0.0" ;;
+              minor) next_version="$major.$((minor + 1)).0" ;;
+              patch) next_version="$major.$minor.$((patch + 1))" ;;
+              *) echo "지원하지 않는 release type: $bump"; exit 1 ;;
+            esac
+          fi
+
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$next_version" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "릴리스 버전: v$next_version"
+
+      - name: Verify Apple Silicon runner
+        if: steps.version.outputs.should_release == 'true'
+        run: |
+          if [[ "$(uname -m)" != "arm64" ]]; then
+            echo "Apple Silicon runner가 아닙니다: $(uname -m)"
+            exit 1
+          fi
+
+      - name: Run checks
+        if: steps.version.outputs.should_release == 'true'
+        working-directory: source
+        run: swift run TossAssetMenuBarCheck
+
+      - name: Build and package with ad-hoc signature
+        if: steps.version.outputs.should_release == 'true'
+        working-directory: source
+        run: ./Scripts/package-release.sh --version "${{ steps.version.outputs.version }}"
+
+      - name: Verify release artifacts
+        if: steps.version.outputs.should_release == 'true'
+        working-directory: source
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          archive="dist/v$VERSION/TossAsset-MenuBar.zip"
+          (
+            cd "dist/v$VERSION"
+            shasum -a 256 -c "TossAsset-MenuBar.zip.sha256"
+          )
+          mkdir -p "$RUNNER_TEMP/release-verification"
+          ditto -x -k "$archive" "$RUNNER_TEMP/release-verification"
+          app="$RUNNER_TEMP/release-verification/TossAsset-MenuBar.app"
+          codesign --verify --deep --strict "$app"
+          [[ "$(lipo -archs "$app/Contents/MacOS/TossAsset-MenuBar")" == "arm64" ]]
+
+      - name: Create GitHub tag and Release
+        if: steps.version.outputs.should_release == 'true'
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_SHA: ${{ steps.version.outputs.release_sha }}
+        run: |
+          args=(
+            "v$VERSION"
+            "dist/v$VERSION/TossAsset-MenuBar.zip"
+            "dist/v$VERSION/TossAsset-MenuBar.zip.sha256"
+            --target "$RELEASE_SHA"
+            --title "TossAsset-MenuBar v$VERSION"
+          )
+
+          # 노트 파일은 버전별로 둔다. 단일 파일로 두면 버전을 올렸을 때 갱신을 잊고
+          # 이전 버전의 노트가 그대로 붙는다 — 자동 생성보다 나쁜 결과다.
+          # 파일이 없으면 커밋·PR 목록으로 자동 생성한다.
+          notes_file=".github/release-notes/v$VERSION.md"
+          if [[ -f "$notes_file" ]]; then
+            echo "릴리스 노트: $notes_file"
+            args+=(--notes-file "$notes_file")
+          else
+            echo "릴리스 노트: 자동 생성 ($notes_file 없음)"
+            args+=(--generate-notes)
+          fi
+
+          gh release create "${args[@]}"

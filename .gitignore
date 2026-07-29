@@ -1,0 +1,31 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# App bundle build output
+build/
+
+# OMC / agent local state
+.omc/
+
+# macOS
+.DS_Store
+*.xcuserstate
+
+# Signing material — never commit private keys / certs
+*.p12
+*.pem
+*.key
+*.cer
+*.certSigningRequest
+
+# Personal dev notes (kept locally, not published)
+docs/
+
+# Agent worktrees / local state
+.claude/
+.worktrees/
+
+# Release artifacts
+dist/
