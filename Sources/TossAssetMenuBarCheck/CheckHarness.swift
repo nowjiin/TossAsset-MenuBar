@@ -35,9 +35,14 @@ actor CheckHarness {
     }
 
     /// 던지길 기대하는 코드. 던지지 않으면 실패로 기록한다.
-    func expectThrows<T>(_ label: String, _ body: () async throws -> T) async {
+    ///
+    /// 반환값을 받지 않는다(`-> Void`). 제네릭 `T` 로 받으면 그 값이 actor 경계를 넘게 되어
+    /// Swift 6.0/6.1 툴체인에서 non-Sendable 오류가 난다. 6.2+ 는 호출자 격리를 물려받아
+    /// 통과하므로 로컬만 초록불이고 CI 가 깨진다. 어차피 값을 쓰지 않으니 받지 않는다.
+    /// 호출부에서 `_ = try await ...` 로 버린다.
+    func expectThrows(_ label: String, _ body: () async throws -> Void) async {
         do {
-            _ = try await body()
+            try await body()
             failures.append("[\(currentGroup)] \(label) — 오류가 발생해야 하는데 성공했습니다")
             print("  ✗ \(label) — 오류가 발생해야 하는데 성공했습니다")
         } catch {
@@ -46,10 +51,10 @@ actor CheckHarness {
         }
     }
 
-    /// 특정 오류가 나오길 기대한다.
-    func expectError<T>(_ expected: TossAPIErrorMatcher, _ label: String, _ body: () async throws -> T) async {
+    /// 특정 오류가 나오길 기대한다. 반환값을 받지 않는 이유는 `expectThrows` 와 같다.
+    func expectError(_ expected: TossAPIErrorMatcher, _ label: String, _ body: () async throws -> Void) async {
         do {
-            _ = try await body()
+            try await body()
             failures.append("[\(currentGroup)] \(label) — 오류가 발생해야 하는데 성공했습니다")
             print("  ✗ \(label) — 오류가 발생해야 하는데 성공했습니다")
         } catch {

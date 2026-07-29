@@ -24,7 +24,7 @@ func runModelChecks(_ check: CheckHarness) async throws {
         await check.expectEqual(a.value - b.value, Decimal(string: "0.01")!, "소수 연산에서 오차가 생기지 않는다")
     }
     await check.expectThrows("숫자가 아닌 문자열은 디코딩 실패로 처리한다") {
-        try decoder.decode(TossDecimal.self, from: Data(#""not-a-number""#.utf8))
+        _ = try decoder.decode(TossDecimal.self, from: Data(#""not-a-number""#.utf8))
     }
 
     // MARK: 보유 주식 디코딩

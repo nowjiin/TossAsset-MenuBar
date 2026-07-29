@@ -121,6 +121,15 @@ jobs:
             exit 1
           fi
 
+      # 러너 툴체인은 로컬보다 낮을 수 있고,
+      # 그 차이 때문에 로컬만 통과하는 일이 음 (동시성 검사 규칙이 버전마다 다르다).
+      # 실패 로그만 보고 원인을 좁힐 수 있도록 버전을 남긴다.
+      - name: Report toolchain
+        if: steps.version.outputs.should_release == 'true'
+        run: |
+          xcodebuild -version
+          swift --version
+
       - name: Run checks
         if: steps.version.outputs.should_release == 'true'
         working-directory: source

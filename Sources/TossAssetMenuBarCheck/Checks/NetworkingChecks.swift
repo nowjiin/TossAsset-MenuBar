@@ -94,7 +94,7 @@ func runNetworkingChecks(_ check: CheckHarness) async throws {
             gate: RateLimitGate()
         )
         await check.expectError(.notConfigured, "키가 없으면 발급을 시도하지 않는다") {
-            try await store.token()
+            _ = try await store.token()
         }
     }
 
@@ -109,7 +109,7 @@ func runNetworkingChecks(_ check: CheckHarness) async throws {
         )
         await store.setCredentials(TossCredentials(clientID: "id", clientSecret: "wrong"))
         await check.expectError(.invalidCredentials, "잘못된 키는 OAuth2 표준 오류로 판별한다") {
-            try await store.token()
+            _ = try await store.token()
         }
     }
 
@@ -122,7 +122,7 @@ func runNetworkingChecks(_ check: CheckHarness) async throws {
         )
         await store.setCredentials(TossCredentials(clientID: "id", clientSecret: "secret"))
         await check.expectError(.ipNotAllowed, "토큰 발급 단계의 403 도 허용 IP 문제로 안내한다") {
-            try await store.token()
+            _ = try await store.token()
         }
     }
 
@@ -164,7 +164,7 @@ func runNetworkingChecks(_ check: CheckHarness) async throws {
     do {
         let (client, _) = await makeClient(["/api/v1/holdings": [.init(body: Fixtures.holdings)]])
         await check.expectError(.accountNotSelected, "계좌를 고르지 않으면 호출 전에 막는다") {
-            try await client.holdings()
+            _ = try await client.holdings()
         }
     }
 
@@ -229,14 +229,14 @@ func runNetworkingChecks(_ check: CheckHarness) async throws {
         ])
         await client.setAccountSeq(1)
         await check.expectError(.ipNotAllowed, "403 은 재시도하지 않고 즉시 안내한다") {
-            try await client.holdings()
+            _ = try await client.holdings()
         }
     }
 
     do {
         let (client, _) = await makeClient(["/api/v1/prices": [.init(body: #"{"result":"엉뚱한값"}"#)]])
         await check.expectError(.decoding, "스펙과 다른 응답은 디코딩 오류로 구분한다") {
-            try await client.prices(symbols: ["005930"])
+            _ = try await client.prices(symbols: ["005930"])
         }
     }
 
