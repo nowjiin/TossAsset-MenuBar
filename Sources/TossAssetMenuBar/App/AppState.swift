@@ -607,11 +607,34 @@ final class AppState {
     }
     #endif
 
-    /// 수익률 탭에 보여줄 보유 종목. 설정에 따라 관심종목만 걸러낸다.
+    /// 수익률 탭에 보여줄 보유 종목. 설정에 따라 관심종목만 걸러내고, 사용자가 정한 순서를 적용한다.
     var visibleHoldings: [HoldingsItem] {
         guard let items = holdings?.items else { return [] }
-        guard settings.onlyShowWatchlistInPortfolio, !settings.watchlist.isEmpty else { return items }
-        let allowed = Set(settings.watchlist)
-        return items.filter { allowed.contains($0.symbol) }
+        let filtered: [HoldingsItem]
+        if settings.onlyShowWatchlistInPortfolio, !settings.watchlist.isEmpty {
+            let allowed = Set(settings.watchlist)
+            filtered = items.filter { allowed.contains($0.symbol) }
+        } else {
+            filtered = items
+        }
+        return HoldingOrder.apply(filtered, order: settings.holdingOrder)
+    }
+
+    /// 목록에서 끌어 옮겼을 때 순서를 저장한다.
+    ///
+    /// `visibleSymbols` 를 함께 받는 이유는 세그먼트나 관심종목 필터가 걸려 있으면 사용자가
+    /// **부분 집합**을 옮기기 때문이다. 그 부분의 새 순서만 전체 순서에 끼워 넣어야
+    /// 화면에 없던 종목의 자리가 멋대로 바뀌지 않는다.
+    func moveHoldings(visibleSymbols: [String], from source: IndexSet, to destination: Int) {
+        let updated = HoldingOrder.applyingMove(
+            to: settings.holdingOrder,
+            visible: visibleSymbols,
+            from: source,
+            to: destination
+        )
+        // 전량 매도한 종목을 덜어낸다. 남겨두면 배열이 계속 길어지고, 다시 샀을 때
+        // 사용자가 기억하지 못하는 예전 자리로 튀어 올라간다.
+        let owned = holdings?.items.map(\.symbol) ?? []
+        settings.holdingOrder = owned.isEmpty ? updated : HoldingOrder.pruned(updated, keeping: owned)
     }
 }

@@ -49,6 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 
 - 보유 종목마다 현재가와 **오늘 등락률**을 함께 보여줍니다. 장이 닫혀 있으면 `종가` 로
   표시해 지금 움직이는 값인지 구분합니다
+- 보유 종목은 **끌어서 순서를 바꿀 수 있습니다.** 순서는 저장되고, 새로 산 종목은 뒤에 붙습니다
 - 메뉴바에는 전체 수익률·전체 손익금액·특정 종목 가격·특정 종목 수익률 중 하나를 띄웁니다
 - 시각은 KST 기준이며, 해외 종목은 미국 동부 현지 시간으로 보여줍니다
 
@@ -69,7 +70,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 
 ```bash
 ./Scripts/build-app.sh          # build/TossAsset-MenuBar.app
-swift run TossAssetMenuBarCheck # 검증 323건
+swift run TossAssetMenuBarCheck # 검증 338건
 ./Scripts/make-icon.swift       # 아이콘 재생성 (디자인 변경 시에만)
 ```
 

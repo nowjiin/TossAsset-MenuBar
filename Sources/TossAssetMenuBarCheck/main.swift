@@ -12,6 +12,7 @@ try await runFormattingChecks(check)
 try await runNetworkingChecks(check)
 try await runOrderHistoryChecks(check)
 try await runDomainChecks(check)
+try await runHoldingOrderChecks(check)
 try await runUpdateChecks(check)
 
 exit(await check.summary())

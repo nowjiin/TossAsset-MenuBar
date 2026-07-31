@@ -261,3 +261,116 @@ func runDomainChecks(_ check: CheckHarness) async throws {
         "역순 도메인 형식이 아니어야 한다"
     )
 }
+
+func runHoldingOrderChecks(_ check: CheckHarness) async throws {
+    let decoder = TossJSON.decoder()
+    let all = try decoder
+        .decode(ApiEnvelope<HoldingsOverview>.self, from: Data(Fixtures.holdings.utf8))
+        .result.items
+
+    await check.group("HoldingOrder — 저장된 순서 적용")
+
+    await check.expectEqual(
+        HoldingOrder.apply(all, order: []).map(\.symbol),
+        all.map(\.symbol),
+        "순서가 비어 있으면 API 순서를 그대로 쓴다 — 옮긴 적 없는 사용자에게 임의 순서를 강요하지 않는다"
+    )
+    await check.expectEqual(
+        HoldingOrder.apply(all, order: ["AAPL", "005930"]).map(\.symbol),
+        ["AAPL", "005930"],
+        "저장된 순서대로 정렬한다"
+    )
+    await check.expectEqual(
+        HoldingOrder.apply(all, order: ["AAPL"]).map(\.symbol),
+        ["AAPL", "005930"],
+        "순서에 없는 종목은 뒤에 붙는다 — 새로 산 종목이 맨 위를 밀어내면 안 된다"
+    )
+    await check.expectEqual(
+        HoldingOrder.apply(all, order: ["TSLA", "NVDA"]).map(\.symbol),
+        all.map(\.symbol),
+        "보유하지 않는 심볼만 있으면 원래 순서가 유지된다"
+    )
+
+    await check.group("HoldingOrder — 끌어 옮기기")
+
+    let symbols = ["A", "B", "C", "D"]
+    await check.expectEqual(
+        HoldingOrder.moving(symbols, from: IndexSet(integer: 0), to: 2),
+        ["B", "A", "C", "D"],
+        "위에서 아래로 한 칸"
+    )
+    await check.expectEqual(
+        HoldingOrder.moving(symbols, from: IndexSet(integer: 3), to: 0),
+        ["D", "A", "B", "C"],
+        "맨 아래를 맨 위로"
+    )
+    await check.expectEqual(
+        HoldingOrder.moving(symbols, from: IndexSet(integer: 0), to: 4),
+        ["B", "C", "D", "A"],
+        "맨 위를 맨 아래로 — destination 은 삽입 지점이라 개수와 같을 수 있다"
+    )
+    await check.expectEqual(
+        HoldingOrder.moving(symbols, from: IndexSet([0, 1]), to: 4),
+        ["C", "D", "A", "B"],
+        "여러 개를 한 번에 옮겨도 상대 순서를 지킨다"
+    )
+    await check.expectEqual(
+        HoldingOrder.moving(symbols, from: IndexSet(integer: 1), to: 1),
+        symbols,
+        "제자리에 놓으면 그대로다"
+    )
+    await check.expectEqual(
+        HoldingOrder.moving(symbols, from: IndexSet(integer: 9), to: 0),
+        symbols,
+        "범위를 벗어난 인덱스는 무시한다"
+    )
+
+    await check.group("HoldingOrder — 부분 집합만 옮겼을 때")
+
+    do {
+        // 국내 세그먼트에서 두 종목만 보이는 상태. 화면에 없던 해외 종목의 자리가 흔들리면 안 된다.
+        let stored = ["005930", "AAPL", "000660", "NVDA"]
+        let visible = ["005930", "000660"]
+        let moved = HoldingOrder.applyingMove(
+            to: stored, visible: visible, from: IndexSet(integer: 1), to: 0
+        )
+        await check.expectEqual(
+            moved, ["000660", "AAPL", "005930", "NVDA"],
+            "보이던 자리에만 새 순서를 끼워 넣는다 — AAPL·NVDA 위치는 그대로다"
+        )
+    }
+
+    do {
+        let moved = HoldingOrder.applyingMove(
+            to: [], visible: ["A", "B", "C"], from: IndexSet(integer: 2), to: 0
+        )
+        await check.expectEqual(
+            moved, ["C", "A", "B"],
+            "저장된 순서가 없으면 보이는 목록으로 새로 만든다"
+        )
+    }
+
+    do {
+        // 새로 산 종목은 저장된 순서에 없다. 옮기기 전에 기준 배열에 편입돼야 한다.
+        let moved = HoldingOrder.applyingMove(
+            to: ["A"], visible: ["A", "NEW"], from: IndexSet(integer: 1), to: 0
+        )
+        await check.expectEqual(
+            moved, ["NEW", "A"],
+            "순서에 없던 종목도 옮길 수 있다"
+        )
+    }
+
+    await check.group("HoldingOrder — 매도한 종목 정리")
+
+    await check.expectEqual(
+        HoldingOrder.pruned(["A", "B", "C"], keeping: ["A", "C"]),
+        ["A", "C"],
+        "보유하지 않는 종목은 순서에서 덜어낸다"
+    )
+    await check.expectEqual(
+        HoldingOrder.pruned(["A", "B"], keeping: ["A", "B", "C"]),
+        ["A", "B"],
+        "순서에 없는 보유 종목을 억지로 넣지 않는다 — 적용 단계에서 뒤에 붙는다"
+    )
+}

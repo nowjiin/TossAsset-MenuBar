@@ -30,6 +30,7 @@ public final class AppSettings {
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.watchlist = Self.loadWatchlist(defaults)
+        self.holdingOrder = defaults.stringArray(forKey: Keys.holdingOrder) ?? []
         self.accountSeq = defaults.object(forKey: Keys.accountSeq) as? Int64
         self.refreshInterval = defaults.object(forKey: Keys.refreshInterval) as? Int ?? 30
         self.showAfterCost = defaults.bool(forKey: Keys.showAfterCost)
@@ -41,6 +42,14 @@ public final class AppSettings {
     /// 관심종목 심볼. 종목 이름 검색 API 가 없으므로 사용자가 심볼을 직접 넣는다.
     public var watchlist: [String] {
         didSet { defaults.set(watchlist, forKey: Keys.watchlist) }
+    }
+
+    /// 사용자가 끌어서 정한 보유 종목 순서. 심볼만 담는다.
+    ///
+    /// 비어 있으면 API 가 준 순서를 그대로 쓴다. 한 번도 옮기지 않은 사용자에게
+    /// 임의의 순서를 강요하지 않기 위해서다.
+    public var holdingOrder: [String] {
+        didSet { defaults.set(holdingOrder, forKey: Keys.holdingOrder) }
     }
 
     public var accountSeq: Int64? {
@@ -109,6 +118,7 @@ public final class AppSettings {
 
     private enum Keys {
         static let watchlist = "watchlist"
+        static let holdingOrder = "holdingOrder"
         static let accountSeq = "accountSeq"
         static let refreshInterval = "refreshInterval"
         static let showAfterCost = "showAfterCost"

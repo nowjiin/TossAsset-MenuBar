@@ -227,20 +227,33 @@ struct PortfolioView: View {
                     systemImage: "list.bullet"
                 )
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(items) { item in
-                            // 개장 여부는 종목이 상장된 시장으로 판단한다. 세그먼트로 판단하면
-                            // `전체` 에서 국내·해외가 섞였을 때 한쪽이 틀린 라벨을 달게 된다.
-                            HoldingRow(
-                                item: item,
-                                showAfterCost: state.settings.showAfterCost,
-                                isMarketOpen: state.openMarkets.contains(item.marketCountry)
-                            )
-                            Divider()
-                        }
+                // `LazyVStack` 대신 `List` 를 쓰는 이유는 **끌어서 순서 바꾸기** 때문이다.
+                // macOS 의 `List` 는 `onMove` 가 붙어 있으면 편집 모드 없이 바로 끌 수 있다.
+                // 기본 배경·여백은 팝오버와 어울리지 않아 걷어내고 행 여백을 직접 맞춘다.
+                List {
+                    ForEach(items) { item in
+                        // 개장 여부는 종목이 상장된 시장으로 판단한다. 세그먼트로 판단하면
+                        // `전체` 에서 국내·해외가 섞였을 때 한쪽이 틀린 라벨을 달게 된다.
+                        HoldingRow(
+                            item: item,
+                            showAfterCost: state.settings.showAfterCost,
+                            isMarketOpen: state.openMarkets.contains(item.marketCountry)
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
+                    .onMove { source, destination in
+                        // 보이는 목록의 심볼을 함께 넘긴다. 세그먼트나 관심종목 필터가 걸려 있으면
+                        // 이건 전체가 아니라 부분 집합이고, 그 사실을 상태 쪽이 알아야 한다.
+                        state.moveHoldings(
+                            visibleSymbols: items.map(\.symbol),
+                            from: source,
+                            to: destination
+                        )
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
     }
