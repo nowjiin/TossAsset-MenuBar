@@ -47,6 +47,8 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 | 관심종목 | 등록한 심볼의 현재가 (보유 여부 무관)                                                     |
 | 설정     | 버전·업데이트 확인, 계좌 선택, 메뉴바 표시 항목, 새로고침 주기, 허용 IP 안내              |
 
+- 보유 종목마다 현재가와 **오늘 등락률**을 함께 보여줍니다. 장이 닫혀 있으면 `종가` 로
+  표시해 지금 움직이는 값인지 구분합니다
 - 메뉴바에는 전체 수익률·전체 손익금액·특정 종목 가격·특정 종목 수익률 중 하나를 띄웁니다
 - 시각은 KST 기준이며, 해외 종목은 미국 동부 현지 시간으로 보여줍니다
 
@@ -67,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 
 ```bash
 ./Scripts/build-app.sh          # build/TossAsset-MenuBar.app
-swift run TossAssetMenuBarCheck # 검증 302건
+swift run TossAssetMenuBarCheck # 검증 314건
 ./Scripts/make-icon.swift       # 아이콘 재생성 (디자인 변경 시에만)
 ```
 

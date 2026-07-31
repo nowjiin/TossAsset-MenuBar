@@ -137,4 +137,63 @@ func runFormattingChecks(_ check: CheckHarness) async throws {
             "미국 동부 기준으로는 같은 날이라 날짜를 붙이지 않는다"
         )
     }
+
+    await check.group("ValueFormatter — 보유 종목 행의 가격·수량")
+
+    await check.expectEqual(
+        ValueFormatter.holdingPrice("72000", currency: .krw, isMarketOpen: true),
+        "현재 72,000원",
+        "장중이면 현재가로 표시한다"
+    )
+    await check.expectEqual(
+        ValueFormatter.holdingPrice("72000", currency: .krw, isMarketOpen: false),
+        "종가 72,000원",
+        "폐장이면 종가로 표시한다 — 세그먼트 표시기와 같은 문구를 쓴다"
+    )
+    await check.expectEqual(
+        ValueFormatter.holdingPrice("178.5", currency: .usd, isMarketOpen: true),
+        "현재 $178.50",
+        "해외 종목은 달러로 표시한다"
+    )
+    await check.expect(
+        !ValueFormatter.holdingPrice("72000", currency: .krw, isMarketOpen: true).contains("-"),
+        "가격에는 부호를 붙이지 않는다 — 손익이 아니라 절대 가격이다"
+    )
+    await check.expect(
+        !ValueFormatter.holdingPrice("72000", currency: .krw, isMarketOpen: true).contains("·"),
+        "구분점은 뷰가 넣는다 — 이름과 가격을 별도 Text 로 두어야 이름만 줄어든다"
+    )
+
+    await check.expectEqual(
+        ValueFormatter.holdingQuantity("100", averagePrice: "65000", currency: .krw),
+        "100주 · 평균 65,000원",
+        "수량과 평균단가는 아래 줄에 둔다"
+    )
+    await check.expectEqual(
+        ValueFormatter.holdingQuantity("0.5231", averagePrice: "155.3", currency: .usd),
+        "0.5231주 · 평균 $155.30",
+        "소수점 매수 수량도 그대로 보여준다"
+    )
+    await check.expect(
+        !ValueFormatter.holdingQuantity("100", averagePrice: "65000", currency: .krw)
+            .contains("현재"),
+        "수량 줄에는 현재가를 넣지 않는다 — 위 줄과 중복된다"
+    )
+
+    await check.expectEqual(
+        ValueFormatter.holdingDailyChange("0.012"), "오늘 +1.20%",
+        "오늘 오른 만큼을 + 로 보여준다"
+    )
+    await check.expectEqual(
+        ValueFormatter.holdingDailyChange("-0.012"), "오늘 -1.20%",
+        "내렸으면 - 로 보여준다"
+    )
+    await check.expectEqual(
+        ValueFormatter.holdingDailyChange("0"), "오늘 0.00%",
+        "변동이 없으면 부호를 붙이지 않는다"
+    )
+    await check.expect(
+        ValueFormatter.holdingDailyChange("0.012").hasPrefix("오늘"),
+        "`오늘` 라벨을 붙인다 — 같은 행에 총 수익률이 함께 있어 구분이 필요하다"
+    )
 }

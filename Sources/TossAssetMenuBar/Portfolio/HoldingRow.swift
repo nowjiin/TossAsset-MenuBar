@@ -6,6 +6,8 @@ import TossAssetMenuBarCore
 struct HoldingRow: View {
     let item: HoldingsItem
     let showAfterCost: Bool
+    /// 이 종목이 상장된 시장이 열려 있는지. 가격 라벨을 `현재`/`종가` 로 구분하는 데 쓴다.
+    let isMarketOpen: Bool
 
     var body: some View {
         let rate = showAfterCost ? item.profitLoss.rateAfterCost : item.profitLoss.rate
@@ -13,13 +15,32 @@ struct HoldingRow: View {
 
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                Text("\(ValueFormatter.quantity(item.quantity))주 · 평균 \(ValueFormatter.price(item.averagePurchasePrice, currency: item.currency))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                // 이름과 가격을 한 `Text` 로 합치지 않는다. 합치면 이름이 긴 종목에서
+                // 한 줄 제한에 걸려 뒤쪽의 가격이 잘려 사라진다.
+                // 가격에 `fixedSize` 를 주어 이름이 먼저 줄어들게 한다.
+                HStack(spacing: 4) {
+                    Text(item.name)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                    Text("· \(priceText)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+                // 오늘 등락률은 색을 입혀야 한눈에 읽히므로 별도 `Text` 로 둔다.
+                // 여기서도 수량 쪽이 먼저 줄어들게 `fixedSize` 를 준다.
+                HStack(spacing: 4) {
+                    Text(quantityText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("· \(dailyChangeText)")
+                        .font(.caption2)
+                        .foregroundStyle(ChangeColor.of(item.dailyProfitLoss.rate))
+                        .monospacedDigit()
+                        .fixedSize()
+                }
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 2) {
@@ -34,5 +55,26 @@ struct HoldingRow: View {
             }
         }
         .padding(.vertical, 7)
+    }
+
+    /// 문구 조립은 `ValueFormatter` 에 있다 — 검증 러너가 확인할 수 있게 두었다.
+    private var priceText: String {
+        ValueFormatter.holdingPrice(
+            item.lastPrice,
+            currency: item.currency,
+            isMarketOpen: isMarketOpen
+        )
+    }
+
+    private var quantityText: String {
+        ValueFormatter.holdingQuantity(
+            item.quantity,
+            averagePrice: item.averagePurchasePrice,
+            currency: item.currency
+        )
+    }
+
+    private var dailyChangeText: String {
+        ValueFormatter.holdingDailyChange(item.dailyProfitLoss.rate)
     }
 }

@@ -119,6 +119,42 @@ public enum ValueFormatter {
         return "\(prefix)\(magnitude)"
     }
 
+    /// 보유 종목의 지금 가격 — 종목명 옆에 붙는다.
+    ///
+    /// 라벨을 `현재`/`종가` 로 구분하는 이유는 세그먼트 표시기와 같다 — 이 숫자가 지금
+    /// 움직이는 값인지 마지막 종가인지 알려준다. 종목마다 시장이 다르므로 호출하는 쪽이
+    /// **그 종목의 시장** 기준으로 판단해 넘겨야 한다. `전체` 세그먼트에서는 국내가 열려 있고
+    /// 해외는 닫혀 있을 수 있다.
+    ///
+    /// 종목명과 합쳐 한 문자열로 돌려주지 않는다. 그러면 이름이 긴 종목에서 한 줄 제한에 걸려
+    /// **가격이 잘려 사라진다.** 뷰에서 별도 `Text` 로 두어 이름이 먼저 줄어들게 한다.
+    public static func holdingPrice(
+        _ lastPrice: TossDecimal,
+        currency: Currency,
+        isMarketOpen: Bool
+    ) -> String {
+        "\(isMarketOpen ? "현재" : "종가") \(price(lastPrice, currency: currency))"
+    }
+
+    /// 보유 종목의 수량과 평균단가 — 종목명 아래 줄.
+    ///
+    /// 총 수익률·손익은 다른 자리에 두고 여기에는 **주당** 값만 둔다.
+    public static func holdingQuantity(
+        _ quantityValue: TossDecimal,
+        averagePrice: TossDecimal,
+        currency: Currency
+    ) -> String {
+        "\(quantity(quantityValue))주 · 평균 \(price(averagePrice, currency: currency))"
+    }
+
+    /// 오늘 등락률.
+    ///
+    /// `오늘` 을 붙이는 이유는 같은 행에 **총 수익률**이 함께 있기 때문이다. 라벨이 없으면
+    /// 두 퍼센트 중 어느 것이 오늘 것인지 알 수 없다.
+    public static func holdingDailyChange(_ rate: TossDecimal) -> String {
+        "오늘 \(signedPercent(rate))"
+    }
+
     /// 보유 수량. 소수 수량(해외 소수점 매수)도 있으므로 필요할 때만 소수를 보여준다.
     public static func quantity(_ value: TossDecimal) -> String {
         let formatter = NumberFormatter()

@@ -230,7 +230,13 @@ struct PortfolioView: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(items) { item in
-                            HoldingRow(item: item, showAfterCost: state.settings.showAfterCost)
+                            // 개장 여부는 종목이 상장된 시장으로 판단한다. 세그먼트로 판단하면
+                            // `전체` 에서 국내·해외가 섞였을 때 한쪽이 틀린 라벨을 달게 된다.
+                            HoldingRow(
+                                item: item,
+                                showAfterCost: state.settings.showAfterCost,
+                                isMarketOpen: state.openMarkets.contains(item.marketCountry)
+                            )
                             Divider()
                         }
                     }
