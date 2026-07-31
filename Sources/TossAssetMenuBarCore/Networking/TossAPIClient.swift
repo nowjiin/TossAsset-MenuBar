@@ -90,40 +90,63 @@ public actor TossAPIClient {
         try await request(.orders(query), as: OrderHistoryPage.self)
     }
 
-    /// 종료된 주문을 여러 페이지에 걸쳐 모은다.
+    /// 진행 중 주문 (체결 대기·부분 체결·취소 대기·정정 대기).
     ///
-    /// `maxPages` 로 상한을 두는 이유는, 계좌 이력이 길면 커서를 끝까지 따라가며 수십 번
-    /// 호출하게 되고 `ORDER_HISTORY` TPS 를 그대로 소진하기 때문이다. 상한에 걸려 남은
-    /// 페이지가 있으면 `hasNext` 가 `true` 로 남으므로 호출한 쪽이 알 수 있다.
+    /// 페이지를 넘기지 않는다 — 문서가 `status=OPEN` 에서는 `limit`/`cursor` 를 무시하고
+    /// **전량 반환**한다고 명시한다. 그래서 커서를 따라갈 필요가 없다.
+    ///
+    /// `from`/`to` 도 넘기지 않는다. `timeInForce` 가 `DAY`/`CLS`/`OPG` 뿐이라 진행 중 주문은
+    /// 당일 것밖에 없고, 기간을 걸면 오히려 놓칠 여지만 생긴다.
+    public func openOrders(symbol: String? = nil) async throws -> [OrderRecord] {
+        try await orders(OrderHistoryQuery(status: .open, symbol: symbol)).orders
+    }
+
+    /// 종료된 주문을 구간별·페이지별로 모은다.
+    ///
+    /// 기간을 한 번에 조회하지 않고 `OrderHistoryQuery.windows(days:)` 로 끊어 **최신 구간부터**
+    /// 조회한다. 이유는 그 함수의 주석에 적어두었다 — `to` 를 비우면 서버가 기간을 잘라내고,
+    /// 정렬 순서도 문서에 없기 때문이다.
+    ///
+    /// `maxPagesPerWindow` 로 상한을 두는 이유는, 이력이 길면 커서를 끝까지 따라가며 수십 번
+    /// 호출하게 되고 `ORDER_HISTORY` TPS 를 소진하기 때문이다. 어느 구간에서든 남은 페이지가
+    /// 있으면 `hasNext` 가 `true` 로 올라오므로 호출한 쪽이 잘렸음을 알 수 있다.
     public func closedOrders(
         symbol: String? = nil,
-        from: String? = nil,
-        to: String? = nil,
+        days: Int = 90,
         pageSize: Int = 100,
-        maxPages: Int = 5
+        maxPagesPerWindow: Int = 3
     ) async throws -> OrderHistoryPage {
         var collected: [OrderRecord] = []
-        var cursor: String?
-        var hasNext = false
+        var truncated = false
 
-        for _ in 0..<max(1, maxPages) {
-            let page = try await orders(
-                OrderHistoryQuery(
-                    status: .closed,
-                    symbol: symbol,
-                    from: from,
-                    to: to,
-                    cursor: cursor,
-                    limit: pageSize
+        let limit = max(1, maxPagesPerWindow)
+        for window in OrderHistoryQuery.windows(days: days) {
+            var cursor: String?
+            for attempt in 0..<limit {
+                let page = try await orders(
+                    OrderHistoryQuery(
+                        status: .closed,
+                        symbol: symbol,
+                        from: window.from,
+                        to: window.to,
+                        cursor: cursor,
+                        limit: pageSize
+                    )
                 )
-            )
-            collected += page.orders
-            hasNext = page.hasNext
-            guard page.hasNext, let next = page.nextCursor else { break }
-            cursor = next
+                collected += page.orders
+                guard page.hasNext, let next = page.nextCursor else { break }
+                cursor = next
+                // 마지막으로 허용된 페이지까지 왔는데도 더 남았다 — 그때만 잘린 것이다.
+                if attempt == limit - 1 { truncated = true }
+            }
         }
 
-        return OrderHistoryPage(orders: collected, nextCursor: cursor, hasNext: hasNext)
+        // 구간 경계에서 같은 주문이 두 번 들어올 여지를 없앤다.
+        // 구간은 겹치지 않게 만들지만, 서버가 경계를 포함하는 방식이 바뀌어도 버티게 한다.
+        var seen = Set<String>()
+        let unique = collected.filter { seen.insert($0.orderId).inserted }
+
+        return OrderHistoryPage(orders: unique, nextCursor: nil, hasNext: truncated)
     }
 
     /// 국내·해외 장 운영 시간. 하루 한 번만 부르면 된다.

@@ -198,9 +198,68 @@ func runOrderHistoryChecks(_ check: CheckHarness) async throws {
         await check.expect(!order.status.isTerminal, "모르는 상태를 종료 상태로 단정하지 않는다")
     }
 
-    await check.group("closedOrders — 커서 페이지 수집")
+    await check.group("조회 구간 — to 를 반드시 채운다")
 
     do {
+        // 실측 회귀: from 만 보내고 to 를 비우면 서버가 기간을 잘라낸다.
+        // 90일을 요청했는데 그 뒤 두 달의 거래가 빠지는 것을 확인했다.
+        let now = Date(timeIntervalSince1970: 1_784_000_000)  // 2026-07-31 KST 근처
+        let windows = OrderHistoryQuery.windows(days: 90, now: now)
+
+        await check.expectEqual(windows.count, 3, "90일을 30일 구간 3개로 나눈다")
+        await check.expect(
+            windows.allSatisfy { !$0.from.isEmpty && !$0.to.isEmpty },
+            "모든 구간이 from 과 to 를 함께 갖는다"
+        )
+        await check.expect(
+            windows[0].to > windows[1].to && windows[1].to > windows[2].to,
+            "최신 구간부터 온다 — 상한에 걸려도 방금 한 거래를 놓치지 않는다"
+        )
+        await check.expectEqual(
+            windows[0].to, OrderHistoryQuery.dateString(now),
+            "첫 구간의 to 는 오늘이다"
+        )
+        await check.expect(
+            windows[0].from > windows[1].to,
+            "구간이 겹치지 않는다"
+        )
+        await check.expectEqual(
+            OrderHistoryQuery.windows(days: 30, now: now).count, 1,
+            "30일이면 구간 하나"
+        )
+        await check.expectEqual(
+            OrderHistoryQuery.windows(days: 31, now: now).count, 2,
+            "31일이면 구간 둘 — 하루가 남으면 버리지 않는다"
+        )
+    }
+
+    await check.group("closedOrders — 구간·커서 수집")
+
+    do {
+        // 구간 3개 × 각 1페이지.
+        let (client, transport) = await makeClient([
+            "/api/v1/orders": [.init(body: Fixtures.closedOrdersPage2)]
+        ])
+        await client.setAccountSeq(1)
+        let page = try await client.closedOrders()
+        await check.expectEqual(
+            transport.requestCount(path: "/api/v1/orders"), 3,
+            "구간마다 한 번씩 조회한다"
+        )
+        await check.expectEqual(
+            page.orders.count, 1,
+            "구간마다 같은 주문이 와도 orderId 로 중복을 걸러낸다"
+        )
+        let query = transport.query(forPath: "/api/v1/orders")
+        await check.expect(
+            query["from"] != nil && query["to"] != nil,
+            "from 과 to 를 항상 함께 보낸다"
+        )
+        await check.expect(!page.hasNext, "상한에 걸리지 않았으면 더 없다고 알린다")
+    }
+
+    do {
+        // 한 구간 안에서 커서를 따라가는지.
         let (client, transport) = await makeClient([
             "/api/v1/orders": [
                 .init(body: Fixtures.closedOrdersPage1),
@@ -208,10 +267,12 @@ func runOrderHistoryChecks(_ check: CheckHarness) async throws {
             ]
         ])
         await client.setAccountSeq(1)
-        let page = try await client.closedOrders()
+        let page = try await client.closedOrders(days: 30)
+        await check.expectEqual(
+            transport.requestCount(path: "/api/v1/orders"), 2,
+            "커서를 따라 다음 페이지를 가져온다"
+        )
         await check.expectEqual(page.orders.count, 2, "두 페이지를 이어 붙인다")
-        await check.expectEqual(transport.requestCount(path: "/api/v1/orders"), 2, "커서를 따라 두 번 호출한다")
-        await check.expectEqual(page.hasNext, false, "마지막 페이지까지 왔으므로 더 없다")
         await check.expectEqual(
             transport.query(forPath: "/api/v1/orders")["cursor"], "CURSOR-2",
             "두 번째 호출에 앞 페이지의 커서를 넘긴다"
@@ -219,13 +280,16 @@ func runOrderHistoryChecks(_ check: CheckHarness) async throws {
     }
 
     do {
-        // 이력이 길면 커서를 끝까지 따라가며 TPS 를 소진한다. 상한이 실제로 걸리는지 본다.
+        // 상한에 걸리면 잘렸다고 알려야 한다. 조용히 자르면 전체라고 믿는다.
         let (client, transport) = await makeClient([
             "/api/v1/orders": [.init(body: Fixtures.closedOrdersPage1)]
         ])
         await client.setAccountSeq(1)
-        let page = try await client.closedOrders(maxPages: 2)
-        await check.expectEqual(transport.requestCount(path: "/api/v1/orders"), 2, "maxPages 에서 멈춘다")
+        let page = try await client.closedOrders(days: 30, maxPagesPerWindow: 2)
+        await check.expectEqual(
+            transport.requestCount(path: "/api/v1/orders"), 2,
+            "maxPagesPerWindow 에서 멈춘다"
+        )
         await check.expect(page.hasNext, "상한에 걸려 남은 페이지가 있음을 알린다")
     }
 
@@ -246,6 +310,49 @@ func runOrderHistoryChecks(_ check: CheckHarness) async throws {
         await check.expectError(.accountNotSelected, "계좌를 고르지 않으면 호출 전에 막는다") {
             _ = try await client.orders(OrderHistoryQuery(status: .closed))
         }
+    }
+
+    await check.group("openOrders — 진행 중 주문도 보여준다")
+
+    do {
+        // CLOSED 만 조회하면 오늘 낸 미체결 주문이 목록에 없다. 그 회귀를 막는다.
+        let (client, transport) = await makeClient([
+            "/api/v1/orders": [.init(body: Fixtures.openOrders)]
+        ])
+        await client.setAccountSeq(1)
+        let orders = try await client.openOrders()
+
+        await check.expectEqual(orders.count, 1, "진행 중 주문을 받아온다")
+        await check.expectEqual(orders.first?.status, .pending, "체결 대기 상태")
+        await check.expectEqual(
+            transport.query(forPath: "/api/v1/orders")["status"], "OPEN",
+            "status=OPEN 으로 조회한다"
+        )
+        await check.expectEqual(
+            transport.requestCount(path: "/api/v1/orders"), 1,
+            "OPEN 은 전량 반환이라 커서를 따라가지 않는다"
+        )
+        let query = transport.query(forPath: "/api/v1/orders")
+        await check.expect(
+            query["from"] == nil && query["to"] == nil,
+            "진행 중 주문에는 기간 필터를 걸지 않는다 — 걸면 놓칠 여지만 생긴다"
+        )
+        await check.expect(
+            query["cursor"] == nil && query["limit"] == nil,
+            "OPEN 에서 무시되는 파라미터는 보내지 않는다"
+        )
+    }
+
+    do {
+        let (client, transport) = await makeClient([
+            "/api/v1/orders": [.init(body: Fixtures.openOrders)]
+        ])
+        await client.setAccountSeq(1)
+        _ = try await client.openOrders(symbol: "005930")
+        await check.expectEqual(
+            transport.query(forPath: "/api/v1/orders")["symbol"], "005930",
+            "종목 필터는 진행 중 주문에도 넘어간다"
+        )
     }
 
     await check.group("OrderHistoryFilter — 종목별 필터")

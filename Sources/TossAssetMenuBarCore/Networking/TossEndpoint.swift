@@ -68,6 +68,45 @@ public struct OrderHistoryQuery: Sendable, Hashable {
 
     /// 페이지 크기 상한. 넘겨도 서버가 잘라내지만, 잘렸는지 알 수 없으니 앱에서 맞춘다.
     public static let maxLimit = 100
+
+    /// 조회 구간. `[from, to]` 를 **둘 다** 채운 날짜 문자열 쌍이다.
+    public struct DateWindow: Sendable, Hashable {
+        public let from: String
+        public let to: String
+    }
+
+    /// `days` 일치를 `windowDays` 일 단위 구간으로 잘라 **최신 구간부터** 돌려준다.
+    ///
+    /// 한 번에 긴 기간을 조회하지 않는 이유는 실측 때문이다. `from` 만 보내고 `to` 를 비우면
+    /// 서버가 `from` 부터 약 30일까지만 돌려주는 것을 확인했다 (90일을 요청했는데 그 뒤 두 달의
+    /// 거래가 빠졌다). 문서에는 그런 제약이 없어서 정확한 규칙을 알 수 없으므로, **항상 `to` 를
+    /// 채우고 구간을 짧게 끊는다.** 그러면 숨은 상한이 무엇이든 구간 안에 들어온다.
+    ///
+    /// 최신 구간을 먼저 조회하는 이유는 CLOSED 의 정렬 순서가 문서에 없기 때문이다. 오래된
+    /// 구간부터 받으면 페이지 상한에 걸렸을 때 방금 한 거래가 빠질 수 있다.
+    public static func windows(
+        days: Int,
+        windowDays: Int = 30,
+        now: Date = Date()
+    ) -> [DateWindow] {
+        precondition(days > 0 && windowDays > 0)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = MarketTimeZone.kst.timeZone
+
+        var result: [DateWindow] = []
+        var offset = 0
+        while offset < days {
+            // to 는 offset 일 전, from 은 그보다 windowDays - 1 일 더 전. 구간이 겹치지 않는다.
+            let span = min(windowDays, days - offset) - 1
+            guard
+                let to = calendar.date(byAdding: .day, value: -offset, to: now),
+                let from = calendar.date(byAdding: .day, value: -(offset + span), to: now)
+            else { break }
+            result.append(DateWindow(from: dateString(from), to: dateString(to)))
+            offset += span + 1
+        }
+        return result
+    }
 }
 
 /// 이 앱이 호출하는 엔드포인트.

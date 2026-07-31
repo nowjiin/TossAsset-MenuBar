@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 | 탭       | 내용                                                                                      |
 | -------- | ----------------------------------------------------------------------------------------- |
 | 수익률   | `전체 / 국내 / 해외` 세그먼트. 권역별 수익률·평가금액·투자원금·일간 손익 + 보유 종목 목록 |
-| 매매내역 | 최근 90일 체결·취소·거부된 주문. 체결 금액·수량·수수료 기준                               |
+| 매매내역 | 진행 중 주문 + 최근 90일 체결·취소·거부된 주문. 종목별 필터                                |
 | 관심종목 | 등록한 심볼의 현재가 (보유 여부 무관)                                                     |
 | 설정     | 버전·업데이트 확인, 계좌 선택, 메뉴바 표시 항목, 새로고침 주기, 허용 IP 안내              |
 
@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 
 ```bash
 ./Scripts/build-app.sh          # build/TossAsset-MenuBar.app
-swift run TossAssetMenuBarCheck # 검증 285건
+swift run TossAssetMenuBarCheck # 검증 302건
 ./Scripts/make-icon.swift       # 아이콘 재생성 (디자인 변경 시에만)
 ```
 
@@ -131,7 +131,9 @@ Gatekeeper 에 막힙니다.
 
 - 실시간 스트리밍 API 가 없어 폴링합니다(기본 30초). 국내·미국 장이 모두 닫히면 폴링을 멈추고
   팝오버를 열 때 갱신합니다
-- 매매내역은 폴링하지 않습니다. 탭을 열 때 한 번 불러오고, 새로고침 버튼으로 갱신합니다
+- 매매내역은 폴링하지 않습니다. 탭을 열 때 불러오고(30초 이내 재방문은 그대로), 새로고침 버튼으로 갱신합니다
+- 매매내역 조회는 30일 구간으로 나눠 최신 구간부터 가져옵니다. `to` 를 비우면 서버가 기간을
+  잘라내고, 정렬 순서도 문서에 없기 때문입니다
 - 종목 이름 검색 API 가 없어 관심종목은 심볼을 직접 입력합니다 (`005930`, `AAPL`)
 - Intel Mac 미지원. universal binary 로 빌드하면 지원할 수 있습니다
 

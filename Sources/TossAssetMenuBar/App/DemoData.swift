@@ -37,8 +37,23 @@ enum DemoData {
     /// USD → KRW. 원화 환산과 비중 막대가 보이도록 값을 준다.
     static let usdToKrw = Decimal(1380)
 
-    /// 매매 내역 예시. 전량 체결·부분 체결 후 취소·시장가를 섞어 화면의 모든 분기를 덮는다.
+    /// 매매 내역 예시. 진행 중·전량 체결·부분 체결 후 취소·시장가·거부를 섞어
+    /// 화면의 모든 분기를 덮는다.
     static let orders: [OrderRecord] = [
+        // 아직 체결되지 않은 지정가 주문. 금액이 `—` 로 나오는 분기다.
+        OrderRecord(
+            orderId: "DEMO-0",
+            symbol: "005930",
+            side: .buy,
+            orderType: .limit,
+            timeInForce: .day,
+            status: .pending,
+            price: "70500",
+            quantity: "10",
+            currency: .krw,
+            orderedAt: daysAgo(0, hour: 9, minute: 5),
+            execution: OrderExecution(filledQuantity: "0")
+        ),
         OrderRecord(
             orderId: "DEMO-1",
             symbol: "005930",

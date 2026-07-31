@@ -25,7 +25,7 @@ struct OrderHistoryView: View {
             } else if state.orderHistory.isEmpty {
                 EmptyStateView(
                     title: "매매 내역이 없습니다",
-                    message: "최근 90일 동안 종료된 주문이 없습니다.",
+                    message: "최근 90일 동안 주문이 없습니다.",
                     systemImage: "clock.arrow.circlepath"
                 )
             } else if state.visibleOrders.isEmpty {
@@ -46,7 +46,8 @@ struct OrderHistoryView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text("최근 90일")
+            // 진행 중 주문은 기간 필터를 걸지 않으므로 "90일" 은 종료된 주문에만 해당한다.
+            Text("진행 중 + 최근 90일")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

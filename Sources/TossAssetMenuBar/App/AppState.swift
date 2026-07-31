@@ -515,21 +515,27 @@ final class AppState {
         #endif
 
         guard hasCredentials, settings.accountSeq != nil, !isLoadingOrders else { return }
-        // 이미 불러왔으면 다시 부르지 않는다. 탭을 왕복할 때마다 호출되면 안 된다.
-        guard force || orderHistoryLoadedAt == nil else { return }
+        // 짧은 시간 안에 탭을 왕복할 때는 재조회하지 않되, 그보다 오래됐으면 다시 부른다.
+        //
+        // "한 번 불러왔으면 끝" 으로 두면 탭을 열어본 뒤 거래하고 다시 열었을 때 예전 목록이
+        // 그대로 남는다. 그러면 새로고침 버튼을 눌러야 하는데, 사용자가 그걸 알아야 한다는
+        // 것 자체가 문제다 — 방금 한 거래가 안 보이면 앱이 고장 난 것으로 읽힌다.
+        guard force || isOrderHistoryStale else { return }
 
         isLoadingOrders = true
         defer { isLoadingOrders = false }
 
         do {
-            let page = try await client.closedOrders(
-                symbol: scope,
-                from: OrderHistoryQuery.dateString(
-                    Date().addingTimeInterval(-Self.orderHistoryWindow)
-                )
-            )
-            orderHistory = page.orders.sorted { $0.displayDate > $1.displayDate }
-            orderHistoryHasMore = page.hasNext
+            // 진행 중 주문과 종료된 주문을 함께 보여준다.
+            //
+            // CLOSED 만 조회하면 **오늘 낸 주문이 아직 체결되지 않았을 때 목록에 없다.**
+            // 지정가를 걸어두고 기다리는 중이 정확히 그 경우인데, 사용자에게는 "거래했는데
+            // 안 보인다" 로 보인다. status 는 두 그룹으로 나뉘어 있어 한 번에 못 받으므로
+            // 두 번 호출한다 (같은 ORDER_HISTORY 그룹, 탭 진입당 2회).
+            let open = try await client.openOrders(symbol: scope)
+            let closed = try await client.closedOrders(symbol: scope, days: Self.orderHistoryDays)
+            orderHistory = (open + closed.orders).sorted { $0.displayDate > $1.displayDate }
+            orderHistoryHasMore = closed.hasNext
             orderHistoryScope = scope
             // 선택지 목록은 **전체 조회 결과에서만** 갱신한다. 종목별 조회 결과로 덮으면
             // 선택지가 그 종목 하나로 줄어들어 다른 종목으로 옮겨갈 수 없게 된다.
@@ -545,8 +551,19 @@ final class AppState {
         }
     }
 
-    /// 기본 조회 범위. 전체 기간을 부르면 계좌 이력이 길수록 커서를 여러 번 따라가게 된다.
-    private static let orderHistoryWindow: TimeInterval = 90 * 24 * 60 * 60
+    /// 기본 조회 범위(일). 클라이언트가 30일 구간으로 끊어 최신 구간부터 조회한다.
+    private static let orderHistoryDays = 90
+
+    /// 이 시간이 지나면 탭을 열 때 다시 불러온다. 폴링이 아니라 **탭 진입 시점**에만 본다.
+    private static let orderHistoryFreshness: TimeInterval = 30
+
+    private var isOrderHistoryStale: Bool {
+        guard let loadedAt = orderHistoryLoadedAt else { return true }
+        let elapsed = Date().timeIntervalSince(loadedAt)
+        // 시스템 시계가 뒤로 돌아가면 음수가 된다. 그 경우도 다시 불러온다 —
+        // 그러지 않으면 시계를 되돌린 만큼 영구히 갱신되지 않는다.
+        return elapsed < 0 || elapsed >= Self.orderHistoryFreshness
+    }
 
     #if DEBUG
     /// 스크린샷용. 네트워크·Keychain 을 건드리지 않고 화면만 채운다.
