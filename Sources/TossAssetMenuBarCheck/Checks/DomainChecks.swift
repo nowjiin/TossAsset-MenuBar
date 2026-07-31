@@ -395,17 +395,76 @@ func runDailyChangeChecks(_ check: CheckHarness) async throws {
         .decode(ApiEnvelope<CandleResponse>.self, from: Data(body.utf8)).result.candles
 
     await check.expectEqual(candles.count, 3, "일봉을 디코딩한다")
+
+    // 오늘이 7/31 이라고 두고 판단한다. 봉은 7/29·7/30·7/31 세 개다.
+    let today = kst("2026-07-31T14:00:00+09:00")
+    let yesterdayOnly = candles.filter {
+        $0.timestamp < kst("2026-07-31T00:00:00+09:00")
+    }
+
+    // 오늘 장이 시작된 경우 — 장중이든 폐장 후든 같다. 기준가는 오늘보다 앞선 최근 봉이다.
     await check.expectEqual(
-        DailyChange.basePrice(from: candles), "248000",
-        "두 번째로 최신인 봉을 기준가로 쓴다 — 응답이 뒤섞여 와도 시각으로 정렬한다"
+        DailyChange.basePrice(from: candles, now: today, zone: .kst, hasSessionStartedToday: true),
+        "248000",
+        "오늘 봉이 있으면 그 앞(어제)이 기준가다"
     )
-    await check.expect(
-        DailyChange.basePrice(from: Array(candles.prefix(1))) == nil,
-        "봉이 하나뿐이면 기준가를 정할 수 없다"
+    // 실제로 겪은 버그 두 개를 함께 막는다.
+    //   (1) 장중에 오늘 봉이 응답에 없었다 → "두 번째로 최신" 을 쓰면 그제가 잡힌다.
+    //   (2) 폐장 후에도 현재가는 오늘 종가인데 "장 닫힘" 으로 보고 그제를 썼다.
+    // 둘 다 상한가 종목을 +30% 대신 +26.42% 로 보이게 했다.
+    await check.expectEqual(
+        DailyChange.basePrice(from: yesterdayOnly, now: today, zone: .kst, hasSessionStartedToday: true),
+        "248000",
+        "오늘 봉이 없어도 오늘 장이 시작됐으면 어제가 기준가다 — 이게 +26.42% 버그였다"
     )
+
+    // 오늘 장이 시작되지 않은 경우 — 개장 전·휴장일·주말. 현재가가 곧 최신 봉의 종가다.
+    await check.expectEqual(
+        DailyChange.basePrice(from: candles, now: today, zone: .kst, hasSessionStartedToday: false),
+        "248000",
+        "개장 전에는 최신 봉(오늘 마감본이 아니라 직전 거래일)의 앞이 기준가다"
+    )
+    await check.expectEqual(
+        DailyChange.basePrice(from: yesterdayOnly, now: today, zone: .kst, hasSessionStartedToday: false),
+        "240000",
+        "주말이면 현재가가 금요일 종가이므로 목요일이 기준가다"
+    )
+
+    do {
+        // 상한가 재현. 어제 -2.75% 후 오늘 +30%.
+        let base: TossDecimal = "248000"          // 어제 종가
+        let dayBefore: TossDecimal = "255000"     // 그제 종가
+        let last = TossDecimal(base.value * Decimal(string: "1.30")!)
+        await check.expectEqual(
+            DailyChange.rate(lastPrice: last, basePrice: base).map { ValueFormatter.signedPercent($0) },
+            "+30.00%",
+            "어제 종가를 기준으로 하면 상한가는 +30% 다"
+        )
+        await check.expect(
+            DailyChange.rate(lastPrice: last, basePrice: dayBefore).map {
+                ValueFormatter.signedPercent($0)
+            } != "+30.00%",
+            "그제 종가를 기준으로 하면 +30% 가 나오지 않는다 — 기준가를 잘못 고르면 이렇게 어긋난다"
+        )
+    }
+
     await check.expect(
-        DailyChange.basePrice(from: []) == nil,
+        DailyChange.basePrice(from: [], now: today, zone: .kst, hasSessionStartedToday: true) == nil,
         "봉이 없으면 nil 이다"
+    )
+    await check.expect(
+        DailyChange.basePrice(
+            from: Array(yesterdayOnly.prefix(1)), now: today, zone: .kst,
+            hasSessionStartedToday: false
+        ) == nil,
+        "개장 전에 봉이 하나뿐이면 기준가를 정할 수 없다"
+    )
+    await check.expect(
+        DailyChange.basePrice(
+            from: candles.filter { $0.timestamp >= kst("2026-07-31T00:00:00+09:00") },
+            now: today, zone: .kst, hasSessionStartedToday: true
+        ) == nil,
+        "오늘 봉만 있으면 비교할 앞 봉이 없어 nil 이다"
     )
 
     await check.expectEqual(
@@ -430,6 +489,125 @@ func runDailyChangeChecks(_ check: CheckHarness) async throws {
         DailyChange.rate(lastPrice: "250000", basePrice: "0") == nil,
         "기준가가 0 이면 나눌 수 없다"
     )
+
+    await check.group("DailyChange — 국내는 상/하한가로 기준가를 역산한다")
+
+    // 국내 종목의 기준가를 일봉에서 구했더니 실제와 달랐다. 상한가 근처 종목이
+    // 토스 앱의 +29.9% 대신 +24.06% 로 계산됐다. 상·하한가는 같은 시세 피드에서 오고
+    // 날짜 경계·수정주가 해석이 개입하지 않아 훨씬 견고하다.
+    await check.expectEqual(
+        DailyChange.basePrice(
+            from: PriceLimits(upperLimitPrice: "93000", lowerLimitPrice: "50400", currency: .krw)
+        ),
+        "71700",
+        "문서 예시: 중간값이 기준가다 (71,700 × 1.3 = 93,210 → 호가 단위 93,000)"
+    )
+    await check.expectEqual(
+        DailyChange.basePrice(
+            from: PriceLimits(upperLimitPrice: "1718000", lowerLimitPrice: "926000", currency: .krw)
+        ),
+        "1322000",
+        "실측: ×1.2996 / ×0.7004 로 대칭이라 중간값이 기준가다"
+    )
+    // 인버스2X ETF 는 상·하한폭이 ±30% 가 아니다. 그래도 **대칭**이므로 중간값은 성립한다.
+    await check.expectEqual(
+        DailyChange.basePrice(
+            from: PriceLimits(upperLimitPrice: "130", lowerLimitPrice: "34", currency: .krw)
+        ),
+        "82",
+        "ETF 는 상·하한폭이 ±60% 지만 대칭이라 중간값이 여전히 기준가다"
+    )
+    await check.expect(
+        DailyChange.basePrice(
+            from: PriceLimits(upperLimitPrice: nil, lowerLimitPrice: nil, currency: .usd)
+        ) == nil,
+        "해외 종목은 상/하한가가 없어 nil 이다 — 그때는 일봉으로 넘어간다"
+    )
+    await check.expect(
+        DailyChange.basePrice(
+            from: PriceLimits(upperLimitPrice: "93000", lowerLimitPrice: nil, currency: .krw)
+        ) == nil,
+        "한쪽만 있으면 역산할 수 없다"
+    )
+    await check.expect(
+        DailyChange.basePrice(
+            from: PriceLimits(upperLimitPrice: "0", lowerLimitPrice: "0", currency: .krw)
+        ) == nil,
+        "둘 다 0 이면 기준가가 0 이라 나눌 수 없다"
+    )
+
+    do {
+        // 상한가 재현: 기준가 1,322,000 → 상한가 1,718,000 은 +29.95% 다.
+        let base: TossDecimal = "1322000"
+        await check.expectEqual(
+            DailyChange.rate(lastPrice: "1718000", basePrice: base)
+                .map { ValueFormatter.signedPercent($0) },
+            "+29.95%",
+            "상한가는 기준가 대비 약 +30% 로 나온다"
+        )
+    }
+
+    await check.group("MarketHours.hasSessionStartedToday — 개장 여부와 다르다")
+
+    do {
+        // 국내 정규장 09:00~15:30 인 날.
+        let hours = MarketHours(
+            kr: KrMarketCalendar(
+                today: KrMarketDay(
+                    date: "2026-07-31",
+                    integrated: KrTradingHours(
+                        preMarket: nil,
+                        regularMarket: MarketSession(
+                            startTime: kst("2026-07-31T09:00:00+09:00"),
+                            endTime: kst("2026-07-31T15:30:00+09:00")
+                        ),
+                        afterMarket: nil
+                    )
+                ),
+                previousBusinessDay: KrMarketDay(date: "2026-07-30", integrated: nil),
+                nextBusinessDay: KrMarketDay(date: "2026-08-03", integrated: nil)
+            ),
+            us: nil
+        )
+
+        await check.expect(
+            !hours.hasSessionStartedToday(.kr, at: kst("2026-07-31T08:30:00+09:00")),
+            "개장 전에는 시작되지 않았다"
+        )
+        await check.expect(
+            hours.hasSessionStartedToday(.kr, at: kst("2026-07-31T14:00:00+09:00")),
+            "장중에는 시작됐다"
+        )
+        // 이게 두 번째 버그의 핵심이다. 폐장 후에도 현재가는 오늘 종가다.
+        await check.expect(
+            hours.hasSessionStartedToday(.kr, at: kst("2026-07-31T16:00:00+09:00")),
+            "폐장 후에도 시작된 것으로 본다 — 현재가가 오늘 종가이므로 기준가는 어제여야 한다"
+        )
+        await check.expect(
+            !hours.isAnyMarketOpen(at: kst("2026-07-31T16:00:00+09:00")),
+            "같은 시각에 '열려 있는가' 는 false 다 — 두 판단이 다르다는 것이 요점이다"
+        )
+        await check.expect(
+            !hours.hasSessionStartedToday(.us, at: kst("2026-07-31T14:00:00+09:00")),
+            "캘린더가 없는 시장은 판단하지 않는다"
+        )
+    }
+
+    do {
+        // 휴장일: 오늘 세션이 없다.
+        let holiday = MarketHours(
+            kr: KrMarketCalendar(
+                today: KrMarketDay(date: "2026-08-01", integrated: nil),
+                previousBusinessDay: KrMarketDay(date: "2026-07-31", integrated: nil),
+                nextBusinessDay: KrMarketDay(date: "2026-08-03", integrated: nil)
+            ),
+            us: nil
+        )
+        await check.expect(
+            !holiday.hasSessionStartedToday(.kr, at: kst("2026-08-01T14:00:00+09:00")),
+            "휴장일에는 시작되지 않았다 — 현재가는 마지막 거래일 종가다"
+        )
+    }
 
     await check.group("candles 엔드포인트")
 

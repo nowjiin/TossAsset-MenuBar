@@ -72,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 
 ```bash
 ./Scripts/build-app.sh          # build/TossAsset-MenuBar.app
-swift run TossAssetMenuBarCheck # 검증 353건
+swift run TossAssetMenuBarCheck # 검증 372건
 ./Scripts/make-icon.swift       # 아이콘 재생성 (디자인 변경 시에만)
 ```
 
@@ -139,6 +139,8 @@ Gatekeeper 에 막힙니다.
 - 매매내역은 폴링하지 않습니다. 탭을 열 때 불러오고(30초 이내 재방문은 그대로), 새로고침 버튼으로 갱신합니다
 - 매매내역 조회는 30일 구간으로 나눠 최신 구간부터 가져옵니다. `to` 를 비우면 서버가 기간을
   잘라내고, 정렬 순서도 문서에 없기 때문입니다
+- 종목 등락률의 기준가는 국내는 **상/하한가의 중간값**으로 역산하고, 해외는 일봉을 씁니다.
+  국내는 일봉의 직전 종가가 실제 기준가와 다른 종목이 있었습니다
 - 종목 이름 검색 API 가 없어 관심종목은 심볼을 직접 입력합니다 (`005930`, `AAPL`)
 - Intel Mac 미지원. universal binary 로 빌드하면 지원할 수 있습니다
 

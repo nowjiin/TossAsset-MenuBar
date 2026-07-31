@@ -42,6 +42,9 @@ final class AppState {
     private(set) var basePrices: [String: TossDecimal] = [:]
     /// 기준가를 받아둔 날(KST). 날짜가 바뀌면 다시 받는다.
     private var basePriceDay: String?
+    /// 기준가를 받을 때 "오늘 장이 시작됐는가" 판단값. 바뀌면 어느 봉을 기준으로 삼을지가
+    /// 달라지므로 다시 받는다. 하루에 한 번(개장 시점) 바뀌므로 종목당 최대 두 번 부른다.
+    private var basePriceSessionState: [String: Bool] = [:]
 
     /// 선택된 종목 필터. `nil` 이면 전체다.
     var orderSymbolFilter: String?
@@ -486,27 +489,50 @@ final class AppState {
         watchlistInfo.removeValue(forKey: symbol)
     }
 
-    /// 보유 종목의 직전 거래일 종가를 받아둔다.
+    /// 보유 종목의 기준가(직전 거래일 종가)를 받아둔다.
     ///
-    /// **하루에 한 번, 종목당 한 번만** 부른다. 전일 종가는 장중에 바뀌지 않는 상수라
-    /// 30초 폴링에 끼워 넣으면 `MARKET_DATA_CHART` 한도만 태운다.
+    /// **하루 한 번, 그리고 장 상태가 바뀔 때 한 번 더** 부른다. 기준가는 장중에 바뀌지 않는
+    /// 값이라 30초 폴링에 끼워 넣으면 한도만 태운다. 다만 일봉을 쓰는 경우에는 장이
+    /// 시작됐는지에 따라 어느 봉을 고를지가 달라지므로, 그 판단이 바뀌면 다시 받아야 한다.
     ///
-    /// 일봉은 종목 하나씩만 조회할 수 있어서 보유 종목 수만큼 호출이 나간다.
-    /// 그래서 실패해도 조용히 넘어간다 — 등락률 하나 때문에 수익률 화면 전체가 막히면 안 된다.
+    /// 국내와 해외의 출처가 다르다. 이유는 `DailyChange.basePrice(from: PriceLimits)` 주석에 있다.
+    ///
+    /// 두 API 모두 종목 하나씩만 조회할 수 있어 보유 종목 수만큼 호출이 나간다. 그래서 실패해도
+    /// 조용히 넘어간다 — 등락률 하나 때문에 수익률 화면 전체가 막히면 안 된다.
     private func refreshBasePricesIfNeeded() async {
         let today = OrderHistoryQuery.dateString(Date())
-        let symbols = holdings?.items.map(\.symbol) ?? []
-        guard !symbols.isEmpty else { return }
+        guard let items = holdings?.items, !items.isEmpty else { return }
 
         if basePriceDay != today {
-            // 날이 바뀌었으면 어제 기준가는 쓸 수 없다.
             basePrices = [:]
+            basePriceSessionState = [:]
             basePriceDay = today
         }
 
-        for symbol in symbols where basePrices[symbol] == nil {
-            guard let base = try? await client.basePrice(symbol: symbol) else { continue }
-            basePrices[symbol] = base
+        for item in items {
+            // **개장 여부가 아니라 "오늘 장이 시작됐는가"** 로 판단한다. 폐장 직후에도
+            // 현재가는 오늘 종가이므로 기준가는 어제여야 한다. 개장 여부로 보면 15:30 이
+            // 지난 뒤 그제가 기준이 되어 이틀치 등락률이 나온다 — 실제로 그렇게 틀렸다.
+            let started = marketHours?.hasSessionStartedToday(item.marketCountry) ?? false
+            // 값이 있고 그때의 판단도 같으면 다시 부르지 않는다.
+            if basePrices[item.symbol] != nil, basePriceSessionState[item.symbol] == started { continue }
+            // 국내는 상/하한가에서 기준가를 역산한다. 일봉의 직전 종가가 실제 기준가와
+            // 다른 종목이 있었다 — 상한가 종목이 +29.9% 대신 +24.06% 로 나왔다.
+            // 해외는 상/하한가가 없어 일봉을 쓴다.
+            var base: TossDecimal?
+            if item.marketCountry == .kr,
+               let limits = try? await client.priceLimits(symbol: item.symbol),
+               let fromLimits = DailyChange.basePrice(from: limits) {
+                base = fromLimits
+            } else if let candles = try? await client.dailyCandles(symbol: item.symbol) {
+                base = DailyChange.basePrice(
+                    from: candles,
+                    zone: MarketTimeZone.forMarket(item.marketCountry),
+                    hasSessionStartedToday: started
+                )
+            }
+            basePrices[item.symbol] = base
+            basePriceSessionState[item.symbol] = started
         }
     }
 

@@ -130,8 +130,10 @@ public enum TossEndpoint: Sendable {
     case marketCalendarUS
     /// 매매 내역. `status` 는 필수다.
     case orders(OrderHistoryQuery)
-    /// 일봉. 전일 종가를 알아내 종목 자체의 등락률을 계산하는 데 쓴다.
+    /// 일봉. 해외 종목의 기준가를 알아내는 데 쓴다.
     case candles(symbol: String, count: Int)
+    /// 당일 상/하한가. **국내 종목의 기준가**를 정확히 역산하는 데 쓴다.
+    case priceLimits(symbol: String)
 
     public var path: String {
         switch self {
@@ -145,6 +147,7 @@ public enum TossEndpoint: Sendable {
         case .marketCalendarUS: "/api/v1/market-calendar/US"
         case .orders: "/api/v1/orders"
         case .candles: "/api/v1/candles"
+        case .priceLimits: "/api/v1/price-limits"
         }
     }
 
@@ -158,6 +161,7 @@ public enum TossEndpoint: Sendable {
         case .exchangeRate, .marketCalendarKR, .marketCalendarUS: .marketInfo
         case .orders: .orderHistory
         case .candles: .marketDataChart
+        case .priceLimits: .marketData
         }
     }
 
@@ -169,7 +173,7 @@ public enum TossEndpoint: Sendable {
         switch self {
         case .holdings, .orders: true
         case .token, .accounts, .prices, .stocks, .exchangeRate,
-             .marketCalendarKR, .marketCalendarUS, .candles: false
+             .marketCalendarKR, .marketCalendarUS, .candles, .priceLimits: false
         }
     }
 
@@ -205,6 +209,8 @@ public enum TossEndpoint: Sendable {
                 URLQueryItem(name: "interval", value: "1d"),
                 URLQueryItem(name: "count", value: String(count)),
             ]
+        case .priceLimits(let symbol):
+            return [URLQueryItem(name: "symbol", value: symbol)]
         case .token, .accounts, .marketCalendarKR, .marketCalendarUS:
             return []
         }

@@ -175,6 +175,24 @@ public struct MarketHours: Sendable {
             .map { MarketOpening(date: $0.session.startTime, market: $0.market) }
     }
 
+    /// 그 시장의 **오늘 장이 이미 시작됐는지**.
+    ///
+    /// "지금 열려 있는지"(`openMarkets`)와 다르다. 폐장 후에도 오늘 장이 있었다면 현재가는
+    /// 오늘 종가이고, 기준가는 어제 종가여야 한다. 개장 여부로 판단하면 폐장 직후에
+    /// 그제 종가가 기준이 되어 이틀치 등락률이 나온다 — 실제로 그렇게 틀렸다.
+    ///
+    /// 휴장일이면 오늘 세션이 없으므로 `false` 다. 그때 현재가는 마지막 거래일 종가다.
+    public func hasSessionStartedToday(_ market: MarketCountry, at date: Date = Date()) -> Bool {
+        let sessions: [MarketSession]
+        switch market {
+        case .kr: sessions = kr?.today.sessions ?? []
+        case .us: sessions = us?.today.sessions ?? []
+        case .other: sessions = []
+        }
+        guard let firstStart = sessions.map(\.startTime).min() else { return false }
+        return date >= firstStart
+    }
+
     /// 캘린더를 하나도 못 받았으면 판단할 근거가 없다.
     /// 이때는 폴링을 멈추지 않는다 — 조회가 안 되는 것보다 조금 더 부르는 게 낫다.
     public var isUnknown: Bool {

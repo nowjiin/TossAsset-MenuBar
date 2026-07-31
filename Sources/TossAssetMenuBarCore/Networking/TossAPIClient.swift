@@ -90,16 +90,22 @@ public actor TossAPIClient {
         try await request(.orders(query), as: OrderHistoryPage.self)
     }
 
-    /// 종목의 직전 거래일 종가.
+    /// 종목의 최근 일봉. 기준가(직전 거래일 종가)를 고르는 데 쓴다.
     ///
-    /// **하루에 한 번만 부르면 된다.** 전일 종가는 장중에 바뀌지 않는 상수라, 30초 폴링에
-    /// 끼워 넣으면 MARKET_DATA_CHART 한도만 태운다. 호출하는 쪽이 날짜 단위로 캐시한다.
+    /// 기준가 계산을 여기서 하지 않는 이유는 **장 상태에 따라 답이 달라지기 때문**이다.
+    /// 네트워킹 계층이 시장 개장 여부를 알 필요는 없으므로 원본 봉을 그대로 넘기고,
+    /// 판단은 `DailyChange.basePrice(from:now:zone:isMarketOpen:)` 에 맡긴다.
     ///
-    /// 봉을 3개 받는 이유는 오늘 첫 체결 전이라 오늘 봉이 아직 없을 수 있어서다.
-    /// 그 경우에도 직전 두 거래일이 들어와 기준가를 고를 수 있다.
-    public func basePrice(symbol: String) async throws -> TossDecimal? {
-        let response = try await request(.candles(symbol: symbol, count: 3), as: CandleResponse.self)
-        return DailyChange.basePrice(from: response.candles)
+    /// 봉을 3개 받는 이유는 오늘 봉이 없을 수 있어서다. 그 경우에도 직전 두 거래일이
+    /// 들어와 어느 쪽을 기준으로 삼든 값이 있다.
+    public func dailyCandles(symbol: String) async throws -> [Candle] {
+        try await request(.candles(symbol: symbol, count: 3), as: CandleResponse.self).candles
+    }
+
+    /// 당일 상/하한가. 국내 종목의 기준가를 역산하는 데 쓴다.
+    /// 해외 종목은 두 값이 `null` 로 온다.
+    public func priceLimits(symbol: String) async throws -> PriceLimits {
+        try await request(.priceLimits(symbol: symbol), as: PriceLimits.self)
     }
 
     /// 진행 중 주문 (체결 대기·부분 체결·취소 대기·정정 대기).
