@@ -404,6 +404,14 @@ final class AppState {
         return raw.flatMap(AppVersion.init) ?? AppVersion(major: 0, minor: 0, patch: 0)
     }
 
+    /// 설정 탭에 보여줄 버전 문구. 로컬 빌드면 `0.3.0 +3` 처럼 표식이 붙는다.
+    var versionLabel: String {
+        BuildLabel.display(
+            shortVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+            bundleVersion: Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+        )
+    }
+
     var installCommand: String { updateChecker.installCommand }
 
     /// 새 버전이 있는지. 설정 탭에 표시를 띄우는 데 쓴다.

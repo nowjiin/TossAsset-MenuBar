@@ -23,6 +23,55 @@ func runUpdateChecks(_ check: CheckHarness) async throws {
     await check.expect(AppVersion("0.9.9")! < AppVersion("1.0.0")!, "major 가 가장 우선")
     await check.expectEqual(AppVersion("v1.0.0"), AppVersion("1.0.0"), "v 접두사만 다르면 같은 버전")
 
+    await check.group("BuildLabel — 로컬 빌드 표식")
+
+    await check.expectEqual(
+        BuildLabel.display(shortVersion: "0.3.0", bundleVersion: "0.3.0"),
+        "0.3.0",
+        "릴리스 빌드는 두 값이 같아 표식이 없다"
+    )
+    await check.expectEqual(
+        BuildLabel.display(shortVersion: "0.3.0", bundleVersion: "0.3.0+3"),
+        "0.3.0 +3",
+        "태그 이후 3커밋이면 +3 을 붙인다"
+    )
+    await check.expectEqual(
+        BuildLabel.display(shortVersion: "0.3.0", bundleVersion: "0.3.0+3.dirty"),
+        "0.3.0 +3.dirty",
+        "작업 트리가 더러우면 .dirty 까지 보여준다"
+    )
+    await check.expectEqual(
+        BuildLabel.display(shortVersion: "0.3.0", bundleVersion: "0.3.0.dirty"),
+        "0.3.0 .dirty",
+        "커밋은 없고 수정만 있어도 로컬 빌드로 표시한다"
+    )
+    await check.expect(
+        BuildLabel.localSuffix(shortVersion: "0.3.0", bundleVersion: "0.3.0") == nil,
+        "릴리스 빌드에는 표식이 없다"
+    )
+    await check.expect(
+        BuildLabel.localSuffix(shortVersion: "0.3.0", bundleVersion: nil) == nil,
+        "CFBundleVersion 이 없으면 표식을 만들지 않는다"
+    )
+    await check.expectEqual(
+        BuildLabel.display(shortVersion: nil, bundleVersion: nil),
+        "0.0.0",
+        "둘 다 없으면 0.0.0 으로 떨어진다"
+    )
+
+    do {
+        // 핵심 회귀: short 쪽에 `+` 가 들어가면 AppVersion 이 파싱하지 못해 버전이 통째로
+        // 깨지고, 업데이트 비교가 0.0.0 기준이 되어 항상 "새 버전 있음" 이 뜬다.
+        await check.expect(
+            AppVersion("0.3.0+3") == nil,
+            "AppVersion 은 + 를 파싱하지 못한다 — 그래서 빌드 정보는 CFBundleVersion 에만 둔다"
+        )
+        await check.expectEqual(
+            AppVersion("0.3.0"), AppVersion("0.3.0"),
+            "로컬 빌드도 태그 버전으로 비교하므로 최신 릴리스와 같다고 판단한다"
+        )
+    }
+
     await check.group("UpdateSchedule — 하루에 한 번 자동 확인")
 
     do {

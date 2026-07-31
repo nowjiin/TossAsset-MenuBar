@@ -15,7 +15,7 @@ struct UpdateSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text("버전 \(state.currentVersion.description)")
+                Text("버전 \(state.versionLabel)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()

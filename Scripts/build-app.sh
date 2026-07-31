@@ -35,6 +35,38 @@ cp "$BINARY" "$APP_DIR/Contents/MacOS/$EXECUTABLE_NAME"
 cp "$INFO_PLIST" "$APP_DIR/Contents/Info.plist"
 printf 'APPL????' > "$APP_DIR/Contents/PkgInfo"
 
+# 소스의 Info.plist 는 버전을 올리지 않는다. 릴리스마다 커밋이 하나씩 붙고 그 커밋이 또
+# 릴리스를 부르는 순환이 생기기 때문이다. 태그가 유일한 버전 출처다.
+#
+# 그래서 로컬 빌드는 그대로 두면 항상 0.1.0 이 되고, 업데이트 확인이 늘 "새 버전 있음" 을
+# 띄운다. 여기서 git 정보로 채워 그 오탐을 없앤다.
+#
+# 비교용과 표시용을 나눈다:
+#   CFBundleShortVersionString ← 최신 태그 (`0.3.0`). AppVersion 이 파싱해 릴리스와 비교한다.
+#   CFBundleVersion            ← 빌드 식별 (`0.3.0+3`, `0.3.0+3.dirty`). 표시에만 쓴다.
+# AppVersion 은 `+` 를 파싱하지 못하므로 short 쪽에 넣으면 버전이 통째로 깨진다.
+#
+# 릴리스 경로에서는 package-release.sh 가 두 값을 실제 릴리스 버전으로 덮어쓴다.
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+	# 릴리스 태그는 CI 가 원격에 만든다. 로컬 클론에는 없어서, 그대로 두면 오래된 태그를 읽고
+	# "새 버전 있음" 오탐이 그대로 남는다. 조용히 한 번 당겨온다 —
+	# 오프라인이면 실패를 무시하고 로컬 태그로 진행한다 (빌드를 막을 이유가 없다).
+	git -C "$ROOT" fetch --tags --quiet origin >/dev/null 2>&1 || true
+
+	LATEST_TAG="$(git -C "$ROOT" tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | sed -n '1p')"
+	if [[ -n "$LATEST_TAG" ]]; then
+		TAG_VERSION="${LATEST_TAG#v}"
+		AHEAD="$(git -C "$ROOT" rev-list --count "$LATEST_TAG..HEAD" 2>/dev/null || echo 0)"
+		BUILD_ID="$TAG_VERSION"
+		[[ "$AHEAD" != "0" ]] && BUILD_ID="$BUILD_ID+$AHEAD"
+		git -C "$ROOT" diff --quiet HEAD 2>/dev/null || BUILD_ID="$BUILD_ID.dirty"
+
+		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $TAG_VERSION" "$APP_DIR/Contents/Info.plist"
+		/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_ID" "$APP_DIR/Contents/Info.plist"
+		echo "▸ 버전 $BUILD_ID"
+	fi
+fi
+
 # 아이콘은 커밋된 산출물이다. 디자인을 바꿨으면 `swift Scripts/make-icon.swift` 로 다시 만든다.
 ICON_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$INFO_PLIST" 2>/dev/null || true)"
 if [[ -n "$ICON_NAME" ]]; then

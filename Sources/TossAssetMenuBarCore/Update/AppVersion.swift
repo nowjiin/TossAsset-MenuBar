@@ -43,3 +43,39 @@ public struct AppVersion: Sendable, Hashable, Comparable, CustomStringConvertibl
         (lhs.major, lhs.minor, lhs.patch) < (rhs.major, rhs.minor, rhs.patch)
     }
 }
+
+/// 설정 탭에 보여줄 버전 문구.
+///
+/// 번들에는 값이 두 개 있다.
+///   `CFBundleShortVersionString` — 비교용. 릴리스 태그와 같은 형태(`0.3.0`)여야
+///                                  `AppVersion` 이 파싱해 업데이트 여부를 판단한다.
+///   `CFBundleVersion`            — 빌드 식별용. 로컬 빌드는 `0.3.0+3` 처럼 태그 이후 커밋 수가
+///                                  붙고, 작업 트리가 더러우면 `.dirty` 가 더 붙는다.
+///
+/// 릴리스 빌드는 `package-release.sh` 가 두 값을 같게 맞춘다. 그래서 **둘이 다르면 로컬 빌드**다.
+public enum BuildLabel {
+    /// 로컬 빌드 표식. 릴리스 빌드면 `nil`.
+    public static func localSuffix(shortVersion: String?, bundleVersion: String?) -> String? {
+        guard
+            let bundleVersion = bundleVersion?.trimmingCharacters(in: .whitespaces),
+            !bundleVersion.isEmpty
+        else { return nil }
+        let short = shortVersion?.trimmingCharacters(in: .whitespaces) ?? ""
+        guard bundleVersion != short else { return nil }
+        // `0.3.0+3.dirty` 에서 `+3.dirty` 만 남긴다. 접두가 다르면 값 전체를 보여준다.
+        guard bundleVersion.hasPrefix(short), !short.isEmpty else { return bundleVersion }
+        return String(bundleVersion.dropFirst(short.count))
+    }
+
+    /// 표시 문구. 릴리스면 `0.3.0`, 로컬 빌드면 `0.3.0 +3` 처럼 표식을 덧붙인다.
+    ///
+    /// 로컬 빌드임을 드러내는 이유는, 릴리스본과 같은 버전으로 보이면 "고쳤는데 왜 그대로지" 를
+    /// 판단할 수 없기 때문이다.
+    public static func display(shortVersion: String?, bundleVersion: String?) -> String {
+        let version = AppVersion(shortVersion ?? "")?.description ?? "0.0.0"
+        guard let suffix = localSuffix(shortVersion: shortVersion, bundleVersion: bundleVersion) else {
+            return version
+        }
+        return "\(version) \(suffix)"
+    }
+}

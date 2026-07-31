@@ -69,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 
 ```bash
 ./Scripts/build-app.sh          # build/TossAsset-MenuBar.app
-swift run TossAssetMenuBarCheck # 검증 314건
+swift run TossAssetMenuBarCheck # 검증 323건
 ./Scripts/make-icon.swift       # 아이콘 재생성 (디자인 변경 시에만)
 ```
 
