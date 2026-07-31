@@ -374,3 +374,75 @@ func runHoldingOrderChecks(_ check: CheckHarness) async throws {
         "순서에 없는 보유 종목을 억지로 넣지 않는다 — 적용 단계에서 뒤에 붙는다"
     )
 }
+
+func runDailyChangeChecks(_ check: CheckHarness) async throws {
+    let decoder = TossJSON.decoder()
+
+    await check.group("DailyChange — 종목 자체의 등락률")
+
+    // 응답 순서를 믿지 않는다. 문서에 정렬 규칙이 없다.
+    let body = """
+    {"result":{"candles":[
+    {"timestamp":"2026-07-29T00:00:00+09:00","openPrice":"1","highPrice":"1","lowPrice":"1",
+     "closePrice":"240000","volume":"1","currency":"KRW"},
+    {"timestamp":"2026-07-31T00:00:00+09:00","openPrice":"1","highPrice":"1","lowPrice":"1",
+     "closePrice":"250000","volume":"1","currency":"KRW"},
+    {"timestamp":"2026-07-30T00:00:00+09:00","openPrice":"1","highPrice":"1","lowPrice":"1",
+     "closePrice":"248000","volume":"1","currency":"KRW"}
+    ],"nextBefore":null}}
+    """
+    let candles = try decoder
+        .decode(ApiEnvelope<CandleResponse>.self, from: Data(body.utf8)).result.candles
+
+    await check.expectEqual(candles.count, 3, "일봉을 디코딩한다")
+    await check.expectEqual(
+        DailyChange.basePrice(from: candles), "248000",
+        "두 번째로 최신인 봉을 기준가로 쓴다 — 응답이 뒤섞여 와도 시각으로 정렬한다"
+    )
+    await check.expect(
+        DailyChange.basePrice(from: Array(candles.prefix(1))) == nil,
+        "봉이 하나뿐이면 기준가를 정할 수 없다"
+    )
+    await check.expect(
+        DailyChange.basePrice(from: []) == nil,
+        "봉이 없으면 nil 이다"
+    )
+
+    await check.expectEqual(
+        DailyChange.rate(lastPrice: "250000", basePrice: "248000").map {
+            ValueFormatter.signedPercent($0)
+        },
+        "+0.81%",
+        "현재가와 기준가로 등락률을 낸다"
+    )
+    await check.expectEqual(
+        DailyChange.rate(lastPrice: "240000", basePrice: "248000").map {
+            ValueFormatter.signedPercent($0)
+        },
+        "-3.23%",
+        "내렸으면 음수다"
+    )
+    await check.expect(
+        DailyChange.rate(lastPrice: "250000", basePrice: nil) == nil,
+        "기준가를 못 받았으면 등락률도 없다 — 계좌 손익률로 대신하지 않는다"
+    )
+    await check.expect(
+        DailyChange.rate(lastPrice: "250000", basePrice: "0") == nil,
+        "기준가가 0 이면 나눌 수 없다"
+    )
+
+    await check.group("candles 엔드포인트")
+
+    let endpoint = TossEndpoint.candles(symbol: "005930", count: 3)
+    await check.expectEqual(endpoint.path, "/api/v1/candles", "경로")
+    await check.expectEqual(endpoint.group, .marketDataChart, "차트 전용 rate limit 그룹")
+    await check.expect(!endpoint.requiresAccount, "시세라 계좌 헤더가 필요 없다")
+
+    let query = Dictionary(
+        endpoint.queryItems.compactMap { item in item.value.map { (item.name, $0) } },
+        uniquingKeysWith: { first, _ in first }
+    )
+    await check.expectEqual(query["symbol"], "005930", "종목")
+    await check.expectEqual(query["interval"], "1d", "일봉만 쓴다 — interval 은 필수 파라미터다")
+    await check.expectEqual(query["count"], "3", "오늘 봉이 아직 없을 수 있어 3개를 받는다")
+}

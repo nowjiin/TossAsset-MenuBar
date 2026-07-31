@@ -181,19 +181,23 @@ func runFormattingChecks(_ check: CheckHarness) async throws {
     )
 
     await check.expectEqual(
-        ValueFormatter.holdingDailyChange("0.012"), "오늘 +1.20%",
-        "오늘 오른 만큼을 + 로 보여준다"
+        ValueFormatter.holdingDailyProfit("0.012"), "오늘 손익 +1.20%",
+        "내 포지션의 오늘 손익률"
     )
     await check.expectEqual(
-        ValueFormatter.holdingDailyChange("-0.012"), "오늘 -1.20%",
-        "내렸으면 - 로 보여준다"
+        ValueFormatter.holdingDailyProfit("-0.012"), "오늘 손익 -1.20%",
+        "손실이면 - 로 보여준다"
     )
     await check.expectEqual(
-        ValueFormatter.holdingDailyChange("0"), "오늘 0.00%",
+        ValueFormatter.holdingDailyProfit("0"), "오늘 손익 0.00%",
         "변동이 없으면 부호를 붙이지 않는다"
     )
     await check.expect(
-        ValueFormatter.holdingDailyChange("0.012").hasPrefix("오늘"),
-        "`오늘` 라벨을 붙인다 — 같은 행에 총 수익률이 함께 있어 구분이 필요하다"
+        ValueFormatter.holdingDailyProfit("0.012").contains("손익"),
+        "`손익` 을 붙여 종목 등락률과 구분한다 — 오늘 산 종목이면 두 값이 다르다"
+    )
+    await check.expect(
+        !ValueFormatter.signedPercent("0.012").contains("오늘"),
+        "종목 등락률은 라벨 없이 가격 옆에 붙는다 — 가격의 움직임으로 읽힌다"
     )
 }

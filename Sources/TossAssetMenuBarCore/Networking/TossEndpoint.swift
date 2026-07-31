@@ -12,6 +12,7 @@ public enum RateLimitGroup: String, Sendable, CaseIterable {
     case marketData = "MARKET_DATA"
     /// 주문 **조회** 전용 그룹. 주문 생성·정정·취소는 별도의 `ORDER` 그룹이며 이 앱은 쓰지 않는다.
     case orderHistory = "ORDER_HISTORY"
+    case marketDataChart = "MARKET_DATA_CHART"
 
     public var defaultRequestsPerSecond: Double {
         switch self {
@@ -24,6 +25,9 @@ public enum RateLimitGroup: String, Sendable, CaseIterable {
         // 문서가 이 그룹의 TPS 를 명시하지 않아 보수적으로 잡았다. 실제 허용치는 첫 응답의
         // `X-RateLimit-Limit` 으로 갱신되므로, 낮게 시작해도 곧 실측값으로 바뀐다.
         case .orderHistory: 3
+        // 문서가 이 그룹의 TPS 를 밝히지 않아 보수적으로 잡았다. 전일종가는 하루 한 번만
+        // 부르므로 낮아도 문제가 없고, 실제 허용치는 응답 헤더로 갱신된다.
+        case .marketDataChart: 3
         }
     }
 }
@@ -126,6 +130,8 @@ public enum TossEndpoint: Sendable {
     case marketCalendarUS
     /// 매매 내역. `status` 는 필수다.
     case orders(OrderHistoryQuery)
+    /// 일봉. 전일 종가를 알아내 종목 자체의 등락률을 계산하는 데 쓴다.
+    case candles(symbol: String, count: Int)
 
     public var path: String {
         switch self {
@@ -138,6 +144,7 @@ public enum TossEndpoint: Sendable {
         case .marketCalendarKR: "/api/v1/market-calendar/KR"
         case .marketCalendarUS: "/api/v1/market-calendar/US"
         case .orders: "/api/v1/orders"
+        case .candles: "/api/v1/candles"
         }
     }
 
@@ -150,6 +157,7 @@ public enum TossEndpoint: Sendable {
         case .stocks: .stock
         case .exchangeRate, .marketCalendarKR, .marketCalendarUS: .marketInfo
         case .orders: .orderHistory
+        case .candles: .marketDataChart
         }
     }
 
@@ -160,7 +168,8 @@ public enum TossEndpoint: Sendable {
     public var requiresAccount: Bool {
         switch self {
         case .holdings, .orders: true
-        case .token, .accounts, .prices, .stocks, .exchangeRate, .marketCalendarKR, .marketCalendarUS: false
+        case .token, .accounts, .prices, .stocks, .exchangeRate,
+             .marketCalendarKR, .marketCalendarUS, .candles: false
         }
     }
 
@@ -189,6 +198,13 @@ public enum TossEndpoint: Sendable {
                 items.append(URLQueryItem(name: "limit", value: String(min(limit, OrderHistoryQuery.maxLimit))))
             }
             return items
+        case .candles(let symbol, let count):
+            // interval 은 필수다. 일봉만 쓰므로 고정한다.
+            return [
+                URLQueryItem(name: "symbol", value: symbol),
+                URLQueryItem(name: "interval", value: "1d"),
+                URLQueryItem(name: "count", value: String(count)),
+            ]
         case .token, .accounts, .marketCalendarKR, .marketCalendarUS:
             return []
         }

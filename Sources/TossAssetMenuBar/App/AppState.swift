@@ -35,6 +35,14 @@ final class AppState {
     /// 페이지 상한에 걸려 더 남았는지. 목록 끝에 안내를 띄우는 데 쓴다.
     var orderHistoryHasMore = false
     var orderHistoryLoadedAt: Date?
+    /// 종목별 직전 거래일 종가. 종목 자체의 등락률을 내는 데 쓴다.
+    ///
+    /// 보유 종목의 `dailyProfitLoss` 는 **내 포지션의 손익률**이라, 오늘 산 종목이면
+    /// 매수가가 기준이 되어 "이 종목이 오늘 얼마나 올랐나" 와 다른 값이 나온다.
+    private(set) var basePrices: [String: TossDecimal] = [:]
+    /// 기준가를 받아둔 날(KST). 날짜가 바뀌면 다시 받는다.
+    private var basePriceDay: String?
+
     /// 선택된 종목 필터. `nil` 이면 전체다.
     var orderSymbolFilter: String?
     /// 필터 선택지. **전체 조회 결과에서만** 갱신한다.
@@ -283,6 +291,7 @@ final class AppState {
 
         await refreshWatchlist(&encountered)
         await refreshExchangeRateIfStale()
+        await refreshBasePricesIfNeeded()
 
         if let encountered {
             handle(encountered)
@@ -477,6 +486,35 @@ final class AppState {
         watchlistInfo.removeValue(forKey: symbol)
     }
 
+    /// 보유 종목의 직전 거래일 종가를 받아둔다.
+    ///
+    /// **하루에 한 번, 종목당 한 번만** 부른다. 전일 종가는 장중에 바뀌지 않는 상수라
+    /// 30초 폴링에 끼워 넣으면 `MARKET_DATA_CHART` 한도만 태운다.
+    ///
+    /// 일봉은 종목 하나씩만 조회할 수 있어서 보유 종목 수만큼 호출이 나간다.
+    /// 그래서 실패해도 조용히 넘어간다 — 등락률 하나 때문에 수익률 화면 전체가 막히면 안 된다.
+    private func refreshBasePricesIfNeeded() async {
+        let today = OrderHistoryQuery.dateString(Date())
+        let symbols = holdings?.items.map(\.symbol) ?? []
+        guard !symbols.isEmpty else { return }
+
+        if basePriceDay != today {
+            // 날이 바뀌었으면 어제 기준가는 쓸 수 없다.
+            basePrices = [:]
+            basePriceDay = today
+        }
+
+        for symbol in symbols where basePrices[symbol] == nil {
+            guard let base = try? await client.basePrice(symbol: symbol) else { continue }
+            basePrices[symbol] = base
+        }
+    }
+
+    /// 종목 자체의 오늘 등락률. 기준가를 아직 못 받았으면 `nil`.
+    func dailyChangeRate(for item: HoldingsItem) -> TossDecimal? {
+        DailyChange.rate(lastPrice: item.lastPrice, basePrice: basePrices[item.symbol])
+    }
+
     // MARK: - 매매 내역
 
     /// 매매 내역은 **폴링하지 않는다.** 거래를 해야 바뀌는 과거 데이터라 30초마다 조회하면
@@ -589,6 +627,8 @@ final class AppState {
 
         hasCredentials = true
         holdings = DemoData.holdings
+        basePrices = DemoData.basePrices
+        basePriceDay = OrderHistoryQuery.dateString(Date())
         watchlistPrices = DemoData.prices
         watchlistInfo = DemoData.stockInfo
         // 원화 환산과 비중 막대가 보이도록 환율을 넣는다.

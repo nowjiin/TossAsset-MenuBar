@@ -76,3 +76,50 @@ public struct ExchangeRate: Decodable, Sendable {
         self.validUntil = validUntil
     }
 }
+
+/// `GET /api/v1/candles` 의 일봉 한 개.
+///
+/// 이 앱은 차트를 그리지 않는다. **전일 종가**만 알면 되므로 종가와 시각만 쓴다.
+public struct Candle: Decodable, Sendable, Hashable {
+    public let timestamp: Date
+    public let closePrice: TossDecimal
+
+    public init(timestamp: Date, closePrice: TossDecimal) {
+        self.timestamp = timestamp
+        self.closePrice = closePrice
+    }
+}
+
+public struct CandleResponse: Decodable, Sendable, Hashable {
+    public let candles: [Candle]
+
+    public init(candles: [Candle]) {
+        self.candles = candles
+    }
+}
+
+/// 종목 자체의 등락률.
+///
+/// 보유 종목의 `dailyProfitLoss` 는 **내 포지션의 손익률**이다. 오늘 산 종목이면 매수가가
+/// 기준이 되어 종목이 실제로 얼마나 올랐는지와 다른 값이 나온다. 종목의 등락률을 보려면
+/// 전일 종가가 필요한데, 토스 API 에서 임의 종목의 기준가를 주는 곳은 일봉뿐이다
+/// (`basePrice` 는 `/rankings` 에만 있고 상위 종목만 나온다).
+public enum DailyChange {
+    /// 일봉 목록에서 기준가(직전 거래일 종가)를 고른다.
+    ///
+    /// **두 번째로 최신인 봉**을 쓴다. 장중이면 최신 봉이 오늘이라 그 앞이 어제 종가이고,
+    /// 폐장이면 최신 봉이 마지막 거래일이라 그 앞이 그 전날 종가다 — 두 경우 모두 맞다.
+    ///
+    /// 응답 정렬 순서가 문서에 없으므로 시각으로 직접 정렬한다.
+    public static func basePrice(from candles: [Candle]) -> TossDecimal? {
+        let sorted = candles.sorted { $0.timestamp > $1.timestamp }
+        guard sorted.count >= 2 else { return nil }
+        return sorted[1].closePrice
+    }
+
+    /// `(현재가 - 기준가) / 기준가`. 기준가가 0 이면 나눌 수 없으므로 `nil`.
+    public static func rate(lastPrice: TossDecimal, basePrice: TossDecimal?) -> TossDecimal? {
+        guard let basePrice, !basePrice.isZero else { return nil }
+        return TossDecimal((lastPrice.value - basePrice.value) / basePrice.value)
+    }
+}

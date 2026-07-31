@@ -147,12 +147,13 @@ public enum ValueFormatter {
         "\(quantity(quantityValue))주 · 평균 \(price(averagePrice, currency: currency))"
     }
 
-    /// 오늘 등락률.
+    /// **내 포지션의** 오늘 손익률.
     ///
-    /// `오늘` 을 붙이는 이유는 같은 행에 **총 수익률**이 함께 있기 때문이다. 라벨이 없으면
-    /// 두 퍼센트 중 어느 것이 오늘 것인지 알 수 없다.
-    public static func holdingDailyChange(_ rate: TossDecimal) -> String {
-        "오늘 \(signedPercent(rate))"
+    /// 종목 자체의 등락률과 다른 값이다. 오늘 산 종목이면 매수가가 기준이 되기 때문이다.
+    /// 그래서 `손익` 을 붙인다 — 같은 행에 종목 등락률과 총 수익률이 함께 있어,
+    /// 라벨이 없으면 세 퍼센트 중 무엇이 무엇인지 구분되지 않는다.
+    public static func holdingDailyProfit(_ rate: TossDecimal) -> String {
+        "오늘 손익 \(signedPercent(rate))"
     }
 
     /// 보유 수량. 소수 수량(해외 소수점 매수)도 있으므로 필요할 때만 소수를 보여준다.

@@ -237,7 +237,8 @@ struct PortfolioView: View {
                         HoldingRow(
                             item: item,
                             showAfterCost: state.settings.showAfterCost,
-                            isMarketOpen: state.openMarkets.contains(item.marketCountry)
+                            isMarketOpen: state.openMarkets.contains(item.marketCountry),
+                            dailyChange: state.dailyChangeRate(for: item)
                         )
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
