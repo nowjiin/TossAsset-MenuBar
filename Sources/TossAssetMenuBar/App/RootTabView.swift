@@ -1,7 +1,7 @@
 import SwiftUI
 import TossAssetMenuBarCore
 
-/// 팝오버 본문. 탭바로 수익률 / 관심종목 / 설정을 나눈다.
+/// 팝오버 본문. 탭바로 수익률 / 매매내역 / 관심종목 / 설정을 나눈다.
 @MainActor
 struct RootTabView: View {
     let state: AppState
@@ -11,6 +11,8 @@ struct RootTabView: View {
             TabView {
                 PortfolioView(state: state)
                     .tabItem { Label("수익률", systemImage: "chart.line.uptrend.xyaxis") }
+                OrderHistoryView(state: state)
+                    .tabItem { Label("매매내역", systemImage: "clock.arrow.circlepath") }
                 WatchlistView(state: state)
                     .tabItem { Label("관심종목", systemImage: "star") }
                 SettingsView(state: state)

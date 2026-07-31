@@ -1,21 +1,23 @@
 name: Release
 
 on:
+  # main 에 푸시하면 검증·빌드를 거쳐 릴리스까지 자동으로 간다.
+  # 올릴 버전은 커밋 메시지에서 뽑는다 (Conventional Commits).
+  push:
+    branches: [main]
+  # 커밋 메시지와 무관하게 특정 버전을 올리고 싶을 때의 탈출구.
   workflow_dispatch:
     inputs:
       release_type:
         description: Initial release or semantic version bump
         required: true
-        default: initial
+        default: patch
         type: choice
         options:
           - initial
           - patch
           - minor
           - major
-  pull_request_target:
-    branches: [main]
-    types: [closed]
 
 permissions:
   contents: write
@@ -27,9 +29,6 @@ concurrency:
 
 jobs:
   release:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.merged == true
     # macOS 15 runner는 arm64이며, 앱의 deployment target(macOS 14+)과는 별개다.
     runs-on: macos-15
 
@@ -39,46 +38,49 @@ jobs:
         with:
           fetch-depth: 0
           path: source
-          ref: >-
-            ${{ github.event_name == 'pull_request_target' &&
-                github.event.pull_request.merge_commit_sha || github.sha }}
 
       - name: Determine release version
         id: version
         working-directory: source
         env:
           MANUAL_RELEASE_TYPE: ${{ inputs.release_type }}
-          RELEASE_SHA: >-
-            ${{ github.event_name == 'pull_request_target' &&
-                github.event.pull_request.merge_commit_sha || github.sha }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           git fetch --force --tags origin
 
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             bump="$MANUAL_RELEASE_TYPE"
           else
-            release_count="$(jq '[.pull_request.labels[].name | select(
-              . == "release:major" or
-              . == "release:minor" or
-              . == "release:patch" or
-              . == "release:none"
-            )] | length' "$GITHUB_EVENT_PATH")"
-            if [[ "$release_count" -ne 1 ]]; then
-              echo "병합된 PR에는 release 라벨이 정확히 하나 있어야 합니다."
-              exit 1
-            fi
-            release_label="$(jq -r '[.pull_request.labels[].name | select(
-              . == "release:major" or
-              . == "release:minor" or
-              . == "release:patch" or
-              . == "release:none"
-            )][0]' "$GITHUB_EVENT_PATH")"
-            bump="${release_label#release:}"
+            # 커밋 메시지에서 올릴 단위를 뽑는다.
+            #
+            # 메시지는 신뢰할 수 없는 입력이므로 셸에 끼워 넣지 않고 jq 로만 다룬다.
+            # `${{ }}` 로 보간하면 메시지에 담긴 문자가 그대로 명령이 된다.
+            #
+            # 이번 푸시에 여러 커밋이 있으면 **가장 큰 단위**를 따른다. feat 과 fix 가
+            # 섞여 있는데 patch 만 올리면 새 기능이 패치로 나가 버린다.
+            bump="$(jq -r '
+              [ .commits[]?.message
+                | split("\n")[0]
+                | if test("^[a-z]+(\\([^)]*\\))?!:") then "major"
+                  elif test("^feat(\\([^)]*\\))?:")  then "minor"
+                  elif test("^(fix|perf|revert)(\\([^)]*\\))?:") then "patch"
+                  else "none" end
+              ]
+              + [ .commits[]?.message
+                  | if test("BREAKING CHANGE") then "major" else "none" end
+                ]
+              | if index("major") then "major"
+                elif index("minor") then "minor"
+                elif index("patch") then "patch"
+                else "none" end
+            ' "$GITHUB_EVENT_PATH")"
+            echo "커밋 메시지에서 판단한 단위: $bump"
           fi
 
           if [[ "$bump" == "none" ]]; then
             echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "release:none — 릴리스를 생성하지 않습니다."
+            echo "올릴 버전이 없어 릴리스를 만들지 않습니다 (docs·ci·chore 등)."
+            echo "검증과 빌드는 아래 스텝에서 계속 진행합니다."
             exit 0
           fi
 
@@ -113,8 +115,11 @@ jobs:
           echo "release_sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
           echo "릴리스 버전: v$next_version"
 
+      # 아래 검증·빌드 스텝은 **릴리스 여부와 무관하게 항상 돌린다.**
+      # 이 워크플로가 이 저장소의 유일한 CI 다. `docs:` 커밋이라 릴리스를 만들지 않는
+      # 경우에도 빌드가 깨졌는지는 알아야 한다 — 접두어는 사람이 붙이는 것이고,
+      # `docs:` 라고 쓰면서 Swift 코드를 고치는 일이 실제로 생긴다.
       - name: Verify Apple Silicon runner
-        if: steps.version.outputs.should_release == 'true'
         run: |
           if [[ "$(uname -m)" != "arm64" ]]; then
             echo "Apple Silicon runner가 아닙니다: $(uname -m)"
@@ -125,17 +130,22 @@ jobs:
       # 그 차이 때문에 로컬만 통과하는 일이 음 (동시성 검사 규칙이 버전마다 다르다).
       # 실패 로그만 보고 원인을 좁힐 수 있도록 버전을 남긴다.
       - name: Report toolchain
-        if: steps.version.outputs.should_release == 'true'
         run: |
           xcodebuild -version
           swift --version
 
       - name: Run checks
-        if: steps.version.outputs.should_release == 'true'
         working-directory: source
         run: swift run TossAssetMenuBarCheck
 
-      - name: Build and package with ad-hoc signature
+      # 번들 조립과 ad-hoc 서명까지 항상 확인한다. 배포 경로가 깨지는 것도
+      # 컴파일 오류와 마찬가지로 푸시 시점에 알아야 한다.
+      - name: Build and sign the app bundle
+        working-directory: source
+        run: ./Scripts/build-app.sh
+
+      # 여기서부터가 릴리스다. 위 검증·빌드가 전부 통과한 뒤에만 실행된다.
+      - name: Package for release
         if: steps.version.outputs.should_release == 'true'
         working-directory: source
         run: ./Scripts/package-release.sh --version "${{ steps.version.outputs.version }}"

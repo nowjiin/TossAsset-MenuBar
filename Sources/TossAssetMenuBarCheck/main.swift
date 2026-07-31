@@ -10,6 +10,7 @@ let check = CheckHarness()
 try await runModelChecks(check)
 try await runFormattingChecks(check)
 try await runNetworkingChecks(check)
+try await runOrderHistoryChecks(check)
 try await runDomainChecks(check)
 try await runUpdateChecks(check)
 

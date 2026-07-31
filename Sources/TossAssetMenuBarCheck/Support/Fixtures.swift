@@ -76,6 +76,78 @@ func kst(_ text: String) -> Date {
     return formatter.date(from: text)!
 }
 
+extension Fixtures {
+    /// 종료된 주문 — 문서 예시 `completedWithNextPage` 그대로. 다음 페이지가 있다.
+    static let closedOrdersPage1 = """
+    {"result":{"orders":[
+    {"orderId":"ORD-1","symbol":"005930","side":"BUY","orderType":"LIMIT","timeInForce":"DAY",
+    "status":"FILLED","price":"70000","quantity":"10","orderAmount":null,"currency":"KRW",
+    "orderedAt":"2026-03-28T09:30:00+09:00","canceledAt":null,
+    "execution":{"filledQuantity":"10","averageFilledPrice":"70000","filledAmount":"700000",
+    "commission":"1400","tax":"0","filledAt":"2026-03-28T09:31:15+09:00","settlementDate":"2026-03-30"}}
+    ],"nextCursor":"CURSOR-2","hasNext":true}}
+    """
+
+    /// 두 번째 페이지. 부분 체결 후 취소된 해외 주문 — 상태만 보고 "체결 없음" 이라 단정하면 틀린다.
+    static let closedOrdersPage2 = """
+    {"result":{"orders":[
+    {"orderId":"ORD-2","symbol":"AAPL","side":"SELL","orderType":"MARKET","timeInForce":"DAY",
+    "status":"CANCELED","price":null,"quantity":"5","orderAmount":null,"currency":"USD",
+    "orderedAt":"2026-03-27T22:30:00+09:00","canceledAt":"2026-03-27T22:35:00+09:00",
+    "execution":{"filledQuantity":"2","averageFilledPrice":"185.25","filledAmount":"370.5",
+    "commission":"0.66","tax":null,"filledAt":"2026-03-27T22:31:00+09:00","settlementDate":"2026-03-31"}}
+    ],"nextCursor":null,"hasNext":false}}
+    """
+
+    /// 미체결 주문 — `filledQuantity` 를 뺀 execution 전부가 null 이다.
+    static let openOrders = """
+    {"result":{"orders":[
+    {"orderId":"ORD-3","symbol":"005930","side":"BUY","orderType":"LIMIT","timeInForce":"DAY",
+    "status":"PENDING","price":"70000","quantity":"10","orderAmount":null,"currency":"KRW",
+    "orderedAt":"2026-03-29T09:30:00+09:00","canceledAt":null,
+    "execution":{"filledQuantity":"0","averageFilledPrice":null,"filledAmount":null,
+    "commission":null,"tax":null,"filledAt":null,"settlementDate":null}}
+    ],"nextCursor":null,"hasNext":false}}
+    """
+
+    /// 문서에 없는 상태·주문유형. unknown 값을 흡수해야 디코딩이 깨지지 않는다.
+    static let ordersWithUnknownEnums = """
+    {"result":{"orders":[
+    {"orderId":"ORD-4","symbol":"005930","side":"SHORT_SELL","orderType":"TRAILING_STOP",
+    "timeInForce":"IOC","status":"SOMETHING_NEW","price":"70000","quantity":"1","orderAmount":null,
+    "currency":"KRW","orderedAt":"2026-03-28T09:30:00+09:00","canceledAt":null,
+    "execution":{"filledQuantity":"0","averageFilledPrice":null,"filledAmount":null,
+    "commission":null,"tax":null,"filledAt":null,"settlementDate":null}}
+    ],"nextCursor":null,"hasNext":false}}
+    """
+
+    static let emptyOrders = """
+    {"result":{"orders":[],"nextCursor":null,"hasNext":false}}
+    """
+
+    /// 두 종목이 섞인 목록. 같은 종목이 두 번 나오고, 체결 시각 순서가 주문 순서와 다르다.
+    /// AAPL(03-28) 이 005930(03-27, 03-26) 보다 최근이다.
+    static let mixedSymbolOrders = """
+    {"result":{"orders":[
+    {"orderId":"S-1","symbol":"005930","side":"BUY","orderType":"LIMIT","timeInForce":"DAY",
+    "status":"FILLED","price":"70000","quantity":"1","orderAmount":null,"currency":"KRW",
+    "orderedAt":"2026-03-27T09:30:00+09:00","canceledAt":null,
+    "execution":{"filledQuantity":"1","averageFilledPrice":"70000","filledAmount":"70000",
+    "commission":"105","tax":"0","filledAt":"2026-03-27T09:31:00+09:00","settlementDate":"2026-03-31"}},
+    {"orderId":"S-2","symbol":"AAPL","side":"SELL","orderType":"LIMIT","timeInForce":"DAY",
+    "status":"FILLED","price":"185","quantity":"2","orderAmount":null,"currency":"USD",
+    "orderedAt":"2026-03-28T22:30:00+09:00","canceledAt":null,
+    "execution":{"filledQuantity":"2","averageFilledPrice":"185","filledAmount":"370",
+    "commission":"0.66","tax":"0","filledAt":"2026-03-28T22:31:00+09:00","settlementDate":"2026-04-01"}},
+    {"orderId":"S-3","symbol":"005930","side":"SELL","orderType":"MARKET","timeInForce":"DAY",
+    "status":"FILLED","price":null,"quantity":"1","orderAmount":null,"currency":"KRW",
+    "orderedAt":"2026-03-26T09:30:00+09:00","canceledAt":null,
+    "execution":{"filledQuantity":"1","averageFilledPrice":"71000","filledAmount":"71000",
+    "commission":"106","tax":"163","filledAt":"2026-03-26T09:31:00+09:00","settlementDate":"2026-03-30"}}
+    ],"nextCursor":null,"hasNext":false}}
+    """
+}
+
 /// 오류 매핑 검증용 envelope 본문.
 func apiErrorBody(_ code: String, _ message: String = "") -> ApiErrorBody {
     ApiErrorBody(requestId: "01HXYZ", code: code, message: message)

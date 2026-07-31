@@ -19,7 +19,10 @@ final class StubTransport: HTTPTransport, @unchecked Sendable {
     /// 다 소비하면 마지막 응답을 계속 반환한다.
     private let lock = NSLock()
     private var stubs: [String: [Stub]]
-    private(set) var requestLog: [(path: String, headers: [String: String], query: [String: String])] = []
+    /// `method` 를 기록하는 이유는 **조회 전용이라는 약속을 검증으로 고정**하기 위해서다.
+    /// 이 앱은 주문을 생성·정정·취소하지 않으므로, 클라이언트가 보내는 요청은 전부 GET 이어야 한다.
+    private(set) var requestLog:
+        [(path: String, method: String, headers: [String: String], query: [String: String])] = []
 
     init(stubs: [String: [Stub]]) {
         self.stubs = stubs
@@ -40,7 +43,12 @@ final class StubTransport: HTTPTransport, @unchecked Sendable {
         )
 
         let stub: Stub? = lock.withLock {
-            requestLog.append((path: path, headers: request.allHTTPHeaderFields ?? [:], query: query))
+            requestLog.append((
+                path: path,
+                method: request.httpMethod ?? "",
+                headers: request.allHTTPHeaderFields ?? [:],
+                query: query
+            ))
             var queue = stubs[path] ?? []
             guard queue.count > 1 else { return queue.first }
             let next = queue.removeFirst()
@@ -70,6 +78,13 @@ final class StubTransport: HTTPTransport, @unchecked Sendable {
 
     func query(forPath path: String) -> [String: String] {
         lock.withLock { requestLog.last { $0.path == path }?.query ?? [:] }
+    }
+
+    /// 기록된 요청에서 GET 이 아닌 것들. 비어 있어야 정상이다.
+    func nonGetRequests() -> [(path: String, method: String)] {
+        lock.withLock {
+            requestLog.filter { $0.method != "GET" }.map { ($0.path, $0.method) }
+        }
     }
 }
 

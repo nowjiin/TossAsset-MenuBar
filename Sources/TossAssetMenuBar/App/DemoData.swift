@@ -37,6 +37,95 @@ enum DemoData {
     /// USD → KRW. 원화 환산과 비중 막대가 보이도록 값을 준다.
     static let usdToKrw = Decimal(1380)
 
+    /// 매매 내역 예시. 전량 체결·부분 체결 후 취소·시장가를 섞어 화면의 모든 분기를 덮는다.
+    static let orders: [OrderRecord] = [
+        OrderRecord(
+            orderId: "DEMO-1",
+            symbol: "005930",
+            side: .buy,
+            orderType: .limit,
+            timeInForce: .day,
+            status: .filled,
+            price: "72000",
+            quantity: "30",
+            currency: .krw,
+            orderedAt: daysAgo(2, hour: 9, minute: 12),
+            execution: OrderExecution(
+                filledQuantity: "30",
+                averageFilledPrice: "72000",
+                filledAmount: "2160000",
+                commission: "3240",
+                tax: "0",
+                filledAt: daysAgo(2, hour: 9, minute: 13),
+                settlementDate: "2026-07-31"
+            )
+        ),
+        OrderRecord(
+            orderId: "DEMO-2",
+            symbol: "NVDA",
+            side: .sell,
+            orderType: .market,
+            timeInForce: .day,
+            status: .filled,
+            quantity: "4",
+            currency: .usd,
+            orderedAt: daysAgo(5, hour: 23, minute: 31),
+            execution: OrderExecution(
+                filledQuantity: "4",
+                averageFilledPrice: "121.4",
+                filledAmount: "485.6",
+                commission: "0.87",
+                tax: "0.01",
+                filledAt: daysAgo(5, hour: 23, minute: 31),
+                settlementDate: "2026-07-29"
+            )
+        ),
+        OrderRecord(
+            orderId: "DEMO-3",
+            symbol: "000660",
+            side: .buy,
+            orderType: .limit,
+            timeInForce: .day,
+            status: .canceled,
+            price: "195000",
+            quantity: "10",
+            currency: .krw,
+            orderedAt: daysAgo(9, hour: 10, minute: 5),
+            canceledAt: daysAgo(9, hour: 14, minute: 40),
+            execution: OrderExecution(
+                filledQuantity: "3",
+                averageFilledPrice: "195000",
+                filledAmount: "585000",
+                commission: "877",
+                tax: "0",
+                filledAt: daysAgo(9, hour: 10, minute: 22),
+                settlementDate: "2026-07-24"
+            )
+        ),
+        OrderRecord(
+            orderId: "DEMO-4",
+            symbol: "AAPL",
+            side: .buy,
+            orderType: .limit,
+            timeInForce: .day,
+            status: .rejected,
+            price: "150",
+            quantity: "2",
+            currency: .usd,
+            orderedAt: daysAgo(14, hour: 22, minute: 45),
+            execution: OrderExecution(filledQuantity: "0")
+        ),
+    ]
+
+    /// 데모 데이터의 시각을 지금 기준으로 만든다. 고정 날짜를 쓰면 시간이 지나면서
+    /// "3개월 전 거래" 처럼 보여 화면이 이상해진다.
+    private static func daysAgo(_ days: Int, hour: Int, minute: Int) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = MarketTimeZone.kst.timeZone
+        let day = calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
+    }
+
     // 아래 숫자는 서로 맞아떨어지게 계산해 두었다.
     // 요약과 종목 목록이 어긋나면 화면을 자세히 보는 사람에게 바로 들킨다.
     //

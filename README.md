@@ -4,7 +4,8 @@
 
 <img src=".github/screenshots/menubar.png" width="94" alt="메뉴바에 표시된 수익률">
 
-**조회 전용입니다.** 주문·조건주문 API 는 구현하지 않았습니다.
+**조회 전용입니다.** 주문 생성·정정·취소와 조건주문 API 는 구현하지 않았습니다.
+매매 내역은 조회만 합니다.
 
 ## 설치
 
@@ -42,6 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 | 탭       | 내용                                                                                      |
 | -------- | ----------------------------------------------------------------------------------------- |
 | 수익률   | `전체 / 국내 / 해외` 세그먼트. 권역별 수익률·평가금액·투자원금·일간 손익 + 보유 종목 목록 |
+| 매매내역 | 최근 90일 체결·취소·거부된 주문. 체결 금액·수량·수수료 기준                               |
 | 관심종목 | 등록한 심볼의 현재가 (보유 여부 무관)                                                     |
 | 설정     | 버전·업데이트 확인, 계좌 선택, 메뉴바 표시 항목, 새로고침 주기, 허용 IP 안내              |
 
@@ -65,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 
 ```bash
 ./Scripts/build-app.sh          # build/TossAsset-MenuBar.app
-swift run TossAssetMenuBarCheck # 검증 213건
+swift run TossAssetMenuBarCheck # 검증 285건
 ./Scripts/make-icon.swift       # 아이콘 재생성 (디자인 변경 시에만)
 ```
 
@@ -84,18 +86,29 @@ Sources/
 
 주요 설계 판단은 해당 코드의 주석에 남겨두었습니다.
 
+CI 는 `macos-15` 러너의 Swift 6.1.2 를 씁니다. 로컬 툴체인이 그보다 높으면 동시성 검사가 더
+관대해서, **로컬에서 통과한 코드가 CI 에서 깨질 수 있습니다.**
+
 ## 배포
 
-`main` 대상 PR 에 아래 라벨 중 하나를 붙이면, 병합 시 워크플로가 빌드·서명·릴리스까지 처리합니다.
+`main` 에 푸시하면 워크플로가 검증·빌드를 거쳐 릴리스까지 처리합니다. 올릴 버전은
+**커밋 메시지 접두어**로 정합니다.
 
-| 라벨            | 다음 버전         |
-| --------------- | ----------------- |
-| `release:major` | `1.4.2` → `2.0.0` |
-| `release:minor` | `1.4.2` → `1.5.0` |
-| `release:patch` | `1.4.2` → `1.4.3` |
-| `release:none`  | 릴리스하지 않음   |
+| 커밋 메시지                        | 다음 버전         |
+| ---------------------------------- | ----------------- |
+| `feat!:` 또는 본문에 `BREAKING CHANGE` | `1.4.2` → `2.0.0` |
+| `feat:`                            | `1.4.2` → `1.5.0` |
+| `fix:` · `perf:` · `revert:`       | `1.4.2` → `1.4.3` |
+| `docs:` · `ci:` · `chore:` 등      | 릴리스하지 않음   |
 
-첫 릴리스는 **Actions → Release → Run workflow** 에서 `initial` 을 선택하면 `v0.1.0` 이 됩니다.
+한 번에 여러 커밋을 푸시하면 **가장 큰 단위**를 따릅니다 — `feat` 과 `fix` 가 섞여 있으면
+minor 입니다.
+
+검증과 빌드는 **릴리스를 만들지 않는 경우에도 항상 돌립니다.** 접두어는 사람이 붙이는
+것이라, `docs:` 라고 쓰면서 코드를 고쳐도 빌드가 깨졌는지는 알아야 합니다.
+
+커밋 메시지와 무관하게 특정 버전을 올리려면 **Actions → Release → Run workflow** 에서
+단위를 직접 고르면 됩니다.
 
 `.github/release-notes/v<버전>.md` 가 있으면 릴리스 본문으로 쓰고, 없으면 자동 생성합니다.
 로컬에서 ZIP 만 만들려면 `./Scripts/package-release.sh` 입니다.
@@ -118,6 +131,7 @@ Gatekeeper 에 막힙니다.
 
 - 실시간 스트리밍 API 가 없어 폴링합니다(기본 30초). 국내·미국 장이 모두 닫히면 폴링을 멈추고
   팝오버를 열 때 갱신합니다
+- 매매내역은 폴링하지 않습니다. 탭을 열 때 한 번 불러오고, 새로고침 버튼으로 갱신합니다
 - 종목 이름 검색 API 가 없어 관심종목은 심볼을 직접 입력합니다 (`005930`, `AAPL`)
 - Intel Mac 미지원. universal binary 로 빌드하면 지원할 수 있습니다
 
@@ -128,3 +142,4 @@ log stream --predicate 'subsystem == "TossAsset-MenuBar"' --level info
 ```
 
 비밀값은 로그에 남기지 않습니다.
+

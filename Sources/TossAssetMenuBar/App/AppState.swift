@@ -29,6 +29,19 @@ final class AppState {
     var lastError: TossAPIError?
     var isRefreshing = false
 
+    /// 매매 내역. 폴링 대상이 아니라 탭을 열 때 한 번 불러온다.
+    var orderHistory: [OrderRecord] = []
+    var isLoadingOrders = false
+    /// 페이지 상한에 걸려 더 남았는지. 목록 끝에 안내를 띄우는 데 쓴다.
+    var orderHistoryHasMore = false
+    var orderHistoryLoadedAt: Date?
+    /// 선택된 종목 필터. `nil` 이면 전체다.
+    var orderSymbolFilter: String?
+    /// 필터 선택지. **전체 조회 결과에서만** 갱신한다.
+    var orderHistorySymbols: [String] = []
+    /// 지금 담긴 목록이 어떤 종목으로 좁혀 받아온 것인지. `nil` 이면 전체 조회 결과다.
+    private var orderHistoryScope: String?
+
     /// 허용 IP 안내용. 사용자가 복사해서 토스증권 설정에 넣는다.
     var publicIP: String?
     var isLookingUpIP = false
@@ -455,6 +468,85 @@ final class AppState {
         watchlistPrices.removeValue(forKey: symbol)
         watchlistInfo.removeValue(forKey: symbol)
     }
+
+    // MARK: - 매매 내역
+
+    /// 매매 내역은 **폴링하지 않는다.** 거래를 해야 바뀌는 과거 데이터라 30초마다 조회하면
+    /// `ORDER_HISTORY` 한도만 태운다. 탭을 열 때 한 번, 그리고 수동 새로고침으로만 가져온다.
+    func loadOrderHistory(force: Bool = false) async {
+        await loadOrderHistory(scope: orderHistoryScope, force: force)
+    }
+
+    /// 화면에 보여줄 매매 내역. 필터가 걸려 있으면 그 종목만 남긴다.
+    ///
+    /// 서버에서 이미 그 종목만 받아온 상태(`orderHistoryScope`)면 다시 걸러내지 않는다.
+    var visibleOrders: [OrderRecord] {
+        guard let symbol = orderSymbolFilter else { return orderHistory }
+        if orderHistoryScope?.caseInsensitiveCompare(symbol) == .orderedSame { return orderHistory }
+        return OrderHistoryFilter.apply(orderHistory, symbol: symbol)
+    }
+
+    /// 종목 필터를 바꾼다.
+    ///
+    /// 목록 전체를 이미 받아왔으면(`!orderHistoryHasMore`) **네트워크를 타지 않고 걸러낸다.**
+    /// 반면 페이지 상한에 걸려 잘린 상태라면 걸러내기만 해서는 그 종목의 내역이 빠질 수 있으므로,
+    /// 서버에 `symbol` 을 넘겨 다시 조회한다. 그래야 "AAPL 거래 전부" 라는 질문에 옳게 답한다.
+    func setOrderSymbolFilter(_ symbol: String?) async {
+        guard orderSymbolFilter != symbol else { return }
+        orderSymbolFilter = symbol
+
+        if let symbol {
+            guard orderHistoryHasMore else { return }
+            await loadOrderHistory(scope: symbol, force: true)
+        } else if orderHistoryScope != nil {
+            // 특정 종목만 받아둔 상태였으니 전체를 다시 가져와야 한다.
+            await loadOrderHistory(scope: nil, force: true)
+        }
+    }
+
+    private func loadOrderHistory(scope: String?, force: Bool) async {
+        #if DEBUG
+        if DemoData.isEnabled {
+            orderHistory = DemoData.orders
+            orderHistorySymbols = OrderHistoryFilter.symbols(in: DemoData.orders)
+            orderHistoryLoadedAt = Date()
+            return
+        }
+        #endif
+
+        guard hasCredentials, settings.accountSeq != nil, !isLoadingOrders else { return }
+        // 이미 불러왔으면 다시 부르지 않는다. 탭을 왕복할 때마다 호출되면 안 된다.
+        guard force || orderHistoryLoadedAt == nil else { return }
+
+        isLoadingOrders = true
+        defer { isLoadingOrders = false }
+
+        do {
+            let page = try await client.closedOrders(
+                symbol: scope,
+                from: OrderHistoryQuery.dateString(
+                    Date().addingTimeInterval(-Self.orderHistoryWindow)
+                )
+            )
+            orderHistory = page.orders.sorted { $0.displayDate > $1.displayDate }
+            orderHistoryHasMore = page.hasNext
+            orderHistoryScope = scope
+            // 선택지 목록은 **전체 조회 결과에서만** 갱신한다. 종목별 조회 결과로 덮으면
+            // 선택지가 그 종목 하나로 줄어들어 다른 종목으로 옮겨갈 수 없게 된다.
+            if scope == nil {
+                orderHistorySymbols = OrderHistoryFilter.symbols(in: orderHistory)
+            }
+            orderHistoryLoadedAt = Date()
+            lastError = nil
+        } catch let error as TossAPIError {
+            handle(error)
+        } catch {
+            handle(.transport(description: "매매 내역을 가져오지 못했습니다."))
+        }
+    }
+
+    /// 기본 조회 범위. 전체 기간을 부르면 계좌 이력이 길수록 커서를 여러 번 따라가게 된다.
+    private static let orderHistoryWindow: TimeInterval = 90 * 24 * 60 * 60
 
     #if DEBUG
     /// 스크린샷용. 네트워크·Keychain 을 건드리지 않고 화면만 채운다.

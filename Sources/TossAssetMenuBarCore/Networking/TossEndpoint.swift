@@ -10,6 +10,8 @@ public enum RateLimitGroup: String, Sendable, CaseIterable {
     case stock = "STOCK"
     case marketInfo = "MARKET_INFO"
     case marketData = "MARKET_DATA"
+    /// 주문 **조회** 전용 그룹. 주문 생성·정정·취소는 별도의 `ORDER` 그룹이며 이 앱은 쓰지 않는다.
+    case orderHistory = "ORDER_HISTORY"
 
     public var defaultRequestsPerSecond: Double {
         switch self {
@@ -19,11 +21,60 @@ public enum RateLimitGroup: String, Sendable, CaseIterable {
         case .stock: 5
         case .marketInfo: 3
         case .marketData: 10
+        // 문서가 이 그룹의 TPS 를 명시하지 않아 보수적으로 잡았다. 실제 허용치는 첫 응답의
+        // `X-RateLimit-Limit` 으로 갱신되므로, 낮게 시작해도 곧 실측값으로 바뀐다.
+        case .orderHistory: 3
         }
     }
 }
 
-/// 이 앱이 호출하는 엔드포인트. 조회 전용이므로 주문·조건주문 계열은 의도적으로 넣지 않는다.
+/// 매매 내역 조회 조건.
+///
+/// `from`/`to` 는 `format: date` 이며 **KST 기준 날짜**다 (`2026-03-01`). 타임스탬프가 아니다.
+/// 문자열로 받는 이유는 앱이 임의의 타임존으로 날짜를 만들어 보내는 사고를 막기 위해서다 —
+/// `OrderHistoryQuery.dateString(_:)` 로만 만들게 한다.
+public struct OrderHistoryQuery: Sendable, Hashable {
+    public var status: OrderStatusFilter
+    public var symbol: String?
+    public var from: String?
+    public var to: String?
+    public var cursor: String?
+    public var limit: Int?
+
+    public init(
+        status: OrderStatusFilter,
+        symbol: String? = nil,
+        from: String? = nil,
+        to: String? = nil,
+        cursor: String? = nil,
+        limit: Int? = nil
+    ) {
+        self.status = status
+        self.symbol = symbol
+        self.from = from
+        self.to = to
+        self.cursor = cursor
+        self.limit = limit
+    }
+
+    /// 서버가 기대하는 `yyyy-MM-dd` 를 **KST 기준으로** 만든다.
+    /// 기기 타임존으로 만들면 자정 근처에서 하루가 밀린다.
+    public static func dateString(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = MarketTimeZone.kst.timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    /// 페이지 크기 상한. 넘겨도 서버가 잘라내지만, 잘렸는지 알 수 없으니 앱에서 맞춘다.
+    public static let maxLimit = 100
+}
+
+/// 이 앱이 호출하는 엔드포인트.
+///
+/// **주문 생성·정정·취소는 넣지 않는다.** `orders` 는 `GET` 조회이며 rate limit 그룹도
+/// 쓰기용 `ORDER` 가 아닌 `ORDER_HISTORY` 다. 조건주문 계열도 전부 제외한다.
+/// 이 규칙은 검증 항목으로 강제된다 — `NetworkingChecks` 의 "쓰기 엔드포인트가 없다" 항목.
 public enum TossEndpoint: Sendable {
     case token
     case accounts
@@ -34,6 +85,8 @@ public enum TossEndpoint: Sendable {
     case exchangeRate(base: Currency, quote: Currency)
     case marketCalendarKR
     case marketCalendarUS
+    /// 매매 내역. `status` 는 필수다.
+    case orders(OrderHistoryQuery)
 
     public var path: String {
         switch self {
@@ -45,6 +98,7 @@ public enum TossEndpoint: Sendable {
         case .exchangeRate: "/api/v1/exchange-rate"
         case .marketCalendarKR: "/api/v1/market-calendar/KR"
         case .marketCalendarUS: "/api/v1/market-calendar/US"
+        case .orders: "/api/v1/orders"
         }
     }
 
@@ -56,6 +110,7 @@ public enum TossEndpoint: Sendable {
         case .prices: .marketData
         case .stocks: .stock
         case .exchangeRate, .marketCalendarKR, .marketCalendarUS: .marketInfo
+        case .orders: .orderHistory
         }
     }
 
@@ -65,7 +120,7 @@ public enum TossEndpoint: Sendable {
     /// 자기 자신이 계좌를 요구할 수는 없다.
     public var requiresAccount: Bool {
         switch self {
-        case .holdings: true
+        case .holdings, .orders: true
         case .token, .accounts, .prices, .stocks, .exchangeRate, .marketCalendarKR, .marketCalendarUS: false
         }
     }
@@ -73,18 +128,30 @@ public enum TossEndpoint: Sendable {
     public var queryItems: [URLQueryItem] {
         switch self {
         case .holdings(let symbol):
-            symbol.map { [URLQueryItem(name: "symbol", value: $0)] } ?? []
+            return symbol.map { [URLQueryItem(name: "symbol", value: $0)] } ?? []
         case .prices(let symbols):
-            [URLQueryItem(name: "symbols", value: symbols.joined(separator: ","))]
+            return [URLQueryItem(name: "symbols", value: symbols.joined(separator: ","))]
         case .stocks(let symbols):
-            [URLQueryItem(name: "symbols", value: symbols.joined(separator: ","))]
+            return [URLQueryItem(name: "symbols", value: symbols.joined(separator: ","))]
         case .exchangeRate(let base, let quote):
-            [
+            return [
                 URLQueryItem(name: "baseCurrency", value: base.rawValue),
                 URLQueryItem(name: "quoteCurrency", value: quote.rawValue),
             ]
+        case .orders(let query):
+            // status 는 필수다. 나머지는 값이 있을 때만 붙인다 — 빈 문자열을 보내면
+            // 서버가 "전체 기간" 대신 잘못된 필터로 받을 수 있다.
+            var items = [URLQueryItem(name: "status", value: query.status.rawValue)]
+            if let symbol = query.symbol { items.append(URLQueryItem(name: "symbol", value: symbol)) }
+            if let from = query.from { items.append(URLQueryItem(name: "from", value: from)) }
+            if let to = query.to { items.append(URLQueryItem(name: "to", value: to)) }
+            if let cursor = query.cursor { items.append(URLQueryItem(name: "cursor", value: cursor)) }
+            if let limit = query.limit {
+                items.append(URLQueryItem(name: "limit", value: String(min(limit, OrderHistoryQuery.maxLimit))))
+            }
+            return items
         case .token, .accounts, .marketCalendarKR, .marketCalendarUS:
-            []
+            return []
         }
     }
 }

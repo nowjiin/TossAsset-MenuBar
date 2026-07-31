@@ -83,6 +83,49 @@ public actor TossAPIClient {
         try await request(.exchangeRate(base: base, quote: quote), as: ExchangeRate.self)
     }
 
+    /// 매매 내역 한 페이지.
+    ///
+    /// **조회 전용이다.** 이 클라이언트에는 주문을 생성·정정·취소하는 메서드가 없다.
+    public func orders(_ query: OrderHistoryQuery) async throws -> OrderHistoryPage {
+        try await request(.orders(query), as: OrderHistoryPage.self)
+    }
+
+    /// 종료된 주문을 여러 페이지에 걸쳐 모은다.
+    ///
+    /// `maxPages` 로 상한을 두는 이유는, 계좌 이력이 길면 커서를 끝까지 따라가며 수십 번
+    /// 호출하게 되고 `ORDER_HISTORY` TPS 를 그대로 소진하기 때문이다. 상한에 걸려 남은
+    /// 페이지가 있으면 `hasNext` 가 `true` 로 남으므로 호출한 쪽이 알 수 있다.
+    public func closedOrders(
+        symbol: String? = nil,
+        from: String? = nil,
+        to: String? = nil,
+        pageSize: Int = 100,
+        maxPages: Int = 5
+    ) async throws -> OrderHistoryPage {
+        var collected: [OrderRecord] = []
+        var cursor: String?
+        var hasNext = false
+
+        for _ in 0..<max(1, maxPages) {
+            let page = try await orders(
+                OrderHistoryQuery(
+                    status: .closed,
+                    symbol: symbol,
+                    from: from,
+                    to: to,
+                    cursor: cursor,
+                    limit: pageSize
+                )
+            )
+            collected += page.orders
+            hasNext = page.hasNext
+            guard page.hasNext, let next = page.nextCursor else { break }
+            cursor = next
+        }
+
+        return OrderHistoryPage(orders: collected, nextCursor: cursor, hasNext: hasNext)
+    }
+
     /// 국내·해외 장 운영 시간. 하루 한 번만 부르면 된다.
     /// 한쪽이 실패해도 다른 쪽으로 판단할 수 있게 개별적으로 시도한다.
     public func marketHours() async -> MarketHours {
