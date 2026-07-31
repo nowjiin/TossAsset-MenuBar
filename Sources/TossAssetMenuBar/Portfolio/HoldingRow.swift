@@ -17,28 +17,34 @@ struct HoldingRow: View {
 
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                // 이름과 가격을 한 `Text` 로 합치지 않는다. 합치면 이름이 긴 종목에서
-                // 한 줄 제한에 걸려 뒤쪽의 가격이 잘려 사라진다.
-                // 가격에 `fixedSize` 를 주어 이름이 먼저 줄어들게 한다.
+                // 종목명은 **자기 줄을 통째로 쓴다.**
+                //
+                // 가격과 같은 줄에 두었더니 `KODEX 200선물인버스2X` 같은 이름이 잘렸다.
+                // 가격 쪽에 `fixedSize` 를 주어 이름이 먼저 줄어들게 한 결과인데,
+                // 정작 사람이 먼저 읽는 것은 이름이라 순서가 거꾸로였다.
+                //
+                // 두 줄까지 허용해 긴 ETF 이름도 끝까지 보이게 한다. 한 줄로 묶어두면
+                // 줄 하나를 통째로 줘도 여전히 잘리는 이름이 남는다.
+                Text(item.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // 가격과 **종목 자체의** 등락률. 나란히 두어 "이 가격이 오늘 이만큼
+                // 움직였다" 로 읽힌다. 아래 줄의 `오늘 손익` 은 내 포지션 기준이라 다른 값이다.
                 HStack(spacing: 4) {
-                    Text(item.name)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1)
-                    Text("· \(priceText)")
+                    Text(priceText)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
-                        .fixedSize()
-                    // **종목 자체의** 등락률. 가격 바로 옆이라 "이 가격이 오늘 이만큼 움직였다"
-                    // 로 읽힌다. 아래 줄의 `오늘 손익` 은 내 포지션 기준이라 다른 값이다.
                     if let dailyChange {
                         Text(ValueFormatter.signedPercent(dailyChange))
                             .font(.caption2.weight(.medium))
                             .foregroundStyle(ChangeColor.of(dailyChange))
                             .monospacedDigit()
-                            .fixedSize()
                     }
                 }
+                .fixedSize()
                 // 오늘 등락률은 색을 입혀야 한눈에 읽히므로 별도 `Text` 로 둔다.
                 // 여기서도 수량 쪽이 먼저 줄어들게 `fixedSize` 를 준다.
                 HStack(spacing: 4) {
