@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 | -------- | ----------------------------------------------------------------------------------------- |
 | 수익률   | `전체 / 국내 / 해외` 세그먼트. 권역별 수익률·평가금액·투자원금·일간 손익 + 보유 종목 목록 |
 | 매매내역 | 진행 중 주문 + 최근 90일 체결·취소·거부된 주문. 종목별 필터                                |
-| 관심종목 | 등록한 심볼의 현재가 (보유 여부 무관)                                                     |
+| 관심종목 | **한글 이름으로 검색**해 추가. 등록한 종목의 현재가 (보유 여부 무관)                       |
 | 설정     | 버전·업데이트 확인, 계좌 선택, 메뉴바 표시 항목, 새로고침 주기, 허용 IP 안내              |
 
 - 보유 종목마다 현재가와 **그 종목의 오늘 등락률**을 종목명 옆에 보여줍니다. 장이 닫혀
@@ -72,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/nowjiin/TossAsset-MenuBar/main/Scri
 
 ```bash
 ./Scripts/build-app.sh          # build/TossAsset-MenuBar.app
-swift run TossAssetMenuBarCheck # 검증 372건
+swift run TossAssetMenuBarCheck # 검증 390건
 ./Scripts/make-icon.swift       # 아이콘 재생성 (디자인 변경 시에만)
 ```
 
@@ -141,7 +141,8 @@ Gatekeeper 에 막힙니다.
   잘라내고, 정렬 순서도 문서에 없기 때문입니다
 - 종목 등락률의 기준가는 국내는 **상/하한가의 중간값**으로 역산하고, 해외는 일봉을 씁니다.
   국내는 일봉의 직전 종가가 실제 기준가와 다른 종목이 있었습니다
-- 종목 이름 검색 API 가 없어 관심종목은 심볼을 직접 입력합니다 (`005930`, `AAPL`)
+- 토스 API 에 종목 이름 검색이 없어 한글 이름 사전을 앱이 들고 있습니다. 사전에 없는 종목은
+  심볼을 직접 입력하면 되고, 한 번 담으면 그다음부터 이름으로 찾힙니다
 - Intel Mac 미지원. universal binary 로 빌드하면 지원할 수 있습니다
 
 ## 문제가 생기면

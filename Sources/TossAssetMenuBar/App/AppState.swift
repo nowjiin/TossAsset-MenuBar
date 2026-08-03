@@ -483,6 +483,48 @@ final class AppState {
         }
     }
 
+    // MARK: - 종목 검색
+
+    /// 이름으로 찾은 후보. 심볼을 알아내는 용도이고, 확정 정보는 토스 `/stocks` 로 받는다.
+    var searchResults: [StockDirectoryEntry] = []
+
+    /// 검색 대상. 미리 담아 둔 목록 + **이미 내 계좌에 있는 종목**.
+    ///
+    /// 두 번째가 목록의 빈틈을 메운다. 보유·관심종목의 한글 이름은 토스가 주므로, 사전에
+    /// 없던 종목도 한 번 담고 나면 다음부터 이름으로 찾힌다.
+    private var searchDirectory: [StockDirectoryEntry] {
+        var known: [StockDirectoryEntry] = []
+        var seen = Set<String>()
+
+        // 내 종목을 앞에 둔다. 같은 이름이 겹치면 내가 실제로 가진 쪽을 먼저 보여주는 게 낫다.
+        for item in holdings?.items ?? [] where seen.insert(item.symbol).inserted {
+            known.append(StockDirectoryEntry(symbol: item.symbol, name: item.name))
+        }
+        for info in watchlistInfo.values where seen.insert(info.symbol).inserted {
+            known.append(StockDirectoryEntry(symbol: info.symbol, name: info.displayName))
+        }
+        return known + StockDirectory.builtIn.filter { !seen.contains($0.symbol) }
+    }
+
+    /// 이름으로 종목을 찾는다. **네트워크를 타지 않는다.**
+    ///
+    /// 심볼을 그대로 친 경우(`005930`, `AAPL`)는 후보를 띄우지 않는다. 그건 바로 추가하면 된다.
+    func searchStocks(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !SymbolValidator.isValid(SymbolValidator.normalize(trimmed)) else {
+            searchResults = []
+            return
+        }
+        // 이미 담은 종목은 후보에서 뺀다. 눌러도 아무 일이 없으면 고장으로 보인다.
+        let existing = Set(settings.watchlist)
+        searchResults = StockDirectory.search(trimmed, in: searchDirectory)
+            .filter { !existing.contains($0.symbol) }
+    }
+
+    func clearSearch() {
+        searchResults = []
+    }
+
     func removeWatchlistSymbol(_ symbol: String) {
         settings.removeFromWatchlist(symbol)
         watchlistPrices.removeValue(forKey: symbol)

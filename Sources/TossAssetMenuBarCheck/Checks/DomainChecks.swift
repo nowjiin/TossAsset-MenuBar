@@ -624,3 +624,103 @@ func runDailyChangeChecks(_ check: CheckHarness) async throws {
     await check.expectEqual(query["interval"], "1d", "일봉만 쓴다 — interval 은 필수 파라미터다")
     await check.expectEqual(query["count"], "3", "오늘 봉이 아직 없을 수 있어 3개를 받는다")
 }
+
+/// 한글 이름으로 심볼을 찾는 사전. 토스에는 이름 검색이 없고, Yahoo 는 한글 질의를
+/// `400 Invalid Search Query` 로 거절해서 (실측) 목록을 직접 들고 있는다.
+func runStockDirectoryChecks(_ check: CheckHarness) async throws {
+    await check.group("StockDirectory — 한글 이름 검색")
+
+    let entries = StockDirectory.builtIn
+
+    await check.expectEqual(
+        StockDirectory.search("삼성전자", in: entries).first?.symbol, "005930",
+        "정확한 이름"
+    )
+    await check.expectEqual(
+        StockDirectory.search("삼전", in: entries).first?.symbol, "005930",
+        "줄임말도 찾는다 — 실제로 이렇게 친다"
+    )
+    await check.expectEqual(
+        StockDirectory.search("하이닉스", in: entries).first?.symbol, "000660",
+        "부분 일치 — SK하이닉스 를 하이닉스 로 찾는다"
+    )
+    await check.expectEqual(
+        StockDirectory.search("삼성", in: entries).first?.symbol, "005930",
+        "여러 개가 걸리면 이름이 정확히 시작하는 쪽을 먼저 준다"
+    )
+    await check.expectEqual(
+        StockDirectory.search("엘지엔솔", in: entries).first?.symbol, "373220",
+        "별칭"
+    )
+    await check.expectEqual(
+        StockDirectory.search("엘지 에너지솔루션", in: entries).first?.symbol, "373220",
+        "띄어쓰기를 다르게 쳐도 찾는다"
+    )
+    await check.expectEqual(
+        StockDirectory.search("애플", in: entries).first?.symbol, "AAPL",
+        "해외 종목도 한글로 찾는다"
+    )
+    await check.expectEqual(
+        StockDirectory.search("곱버스", in: entries).first?.symbol, "252670",
+        "속칭도 별칭으로 담아 둔다"
+    )
+    await check.expect(
+        StockDirectory.search("없는종목이름", in: entries).isEmpty,
+        "없으면 빈 목록이다 — 심볼 직접 입력이라는 길이 남아 있다"
+    )
+    await check.expect(
+        StockDirectory.search("   ", in: entries).isEmpty,
+        "공백만 있으면 찾지 않는다"
+    )
+    await check.expect(
+        StockDirectory.search("삼", in: entries).count <= 8,
+        "후보는 8개까지만 — 목록이 화면을 덮으면 안 된다"
+    )
+
+    await check.group("StockDirectory — 순위와 중복")
+
+    do {
+        let sample = [
+            StockDirectoryEntry(symbol: "AAA", name: "가나다전자"),
+            StockDirectoryEntry(symbol: "BBB", name: "나다"),
+            StockDirectoryEntry(symbol: "CCC", name: "다라마", aliases: ["나다"]),
+        ]
+        await check.expectEqual(
+            StockDirectory.search("나다", in: sample).map(\.symbol),
+            ["BBB", "CCC", "AAA"],
+            "정확히 일치 → 앞부분 일치 → 포함 순으로 준다"
+        )
+    }
+
+    do {
+        // 사용자가 이미 담은 종목이 앞에 오고, 같은 심볼은 한 번만 나와야 한다.
+        let mine = [StockDirectoryEntry(symbol: "005930", name: "삼성전자")]
+        let merged = mine + entries.filter { $0.symbol != "005930" }
+        let found = StockDirectory.search("삼성전자", in: merged)
+        await check.expectEqual(found.filter { $0.symbol == "005930" }.count, 1, "중복은 한 번만")
+    }
+
+    await check.group("StockDirectory — 사전 자체의 무결성")
+
+    do {
+        var seen = Set<String>()
+        let duplicates = entries.filter { !seen.insert($0.symbol).inserted }.map(\.symbol)
+        await check.expect(duplicates.isEmpty, "같은 심볼을 두 번 넣지 않았다 \(duplicates)")
+
+        let invalid = entries.filter { !SymbolValidator.isValid($0.symbol) }.map(\.symbol)
+        await check.expect(
+            invalid.isEmpty,
+            "모든 심볼이 토스가 받는 형태다 \(invalid) — 아니면 눌러도 실패한다"
+        )
+
+        let unnamed = entries.filter { $0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+        await check.expect(unnamed.isEmpty, "이름이 빈 항목이 없다")
+
+        let domestic = entries.filter { $0.symbol.allSatisfy(\.isNumber) }
+        await check.expect(
+            domestic.allSatisfy { $0.symbol.count == 6 },
+            "국내 심볼은 6자리다"
+        )
+        await check.expect(entries.count >= 100, "충분한 수를 담았다 (현재 \(entries.count)개)")
+    }
+}
